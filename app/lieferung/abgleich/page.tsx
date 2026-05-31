@@ -1,15 +1,139 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
+import { AbgleichAnalysis } from "../../../lib/types";
+import { updateLieferung } from "../../../lib/database";
 
 export default function AbgleichPage() {
   const [file, setFile] = useState<File | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [results, setResults] = useState<AbgleichAnalysis | null>(null);
+  const [lieferungId, setLieferungId] = useState<string | null>(null);
+  const [lieferscheinData, setLieferscheinData] = useState<any>(null);
+  const [fehler, setFehler] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+
+  useEffect(() => {
+    const id = localStorage.getItem("lieferungId");
+    if (id) setLieferungId(id);
+    const lieferschein = localStorage.getItem("lieferscheinData");
+    if (lieferschein) setLieferscheinData(JSON.parse(lieferschein));
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setFile(e.target.files[0]);
+      setResults(null);
+      setFehler(null);
+    }
+  };
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      setFile(e.dataTransfer.files[0]);
+      setResults(null);
+      setFehler(null);
+    }
+  };
+
+  const handleRemoveFile = () => {
+    setFile(null);
+    setResults(null);
+    setFehler(null);
+  };
+
+  const parseCSV = (text: string) => {
+    const lines = text.split("\n").filter((l) => l.trim());
+    const headers = lines[0].split(/[,;]/).map((h) => h.trim());
+    return lines.slice(1).map((line) => {
+      const values = line.split(/[,;]/).map((v) => v.trim());
+      const obj: any = {};
+      headers.forEach((h, i) => (obj[h] = values[i]));
+      return obj;
+    });
+  };
+
+  const handleAnalyze = async () => {
+    if (!file) return;
+    if (!lieferscheinData) {
+      setFehler("Kein Lieferschein aus Schritt 2 gefunden. Bitte zuerst den Lieferschein analysieren.");
+      return;
+    }
+
+    setAnalyzing(true);
+    setFehler(null);
+
+    try {
+      let bestellungData: any = null;
+      const fileName = file.name.toLowerCase();
+
+      if (fileName.endsWith(".csv")) {
+        const text = await file.text();
+        bestellungData = parseCSV(text);
+      } else if (
+        fileName.endsWith(".png") ||
+        fileName.endsWith(".jpg") ||
+        fileName.endsWith(".jpeg")
+      ) {
+        const reader = new FileReader();
+        const base64 = await new Promise<string>((resolve) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(file);
+        });
+
+        const bildResponse = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "lieferschein", images: [base64] }),
+        });
+        bestellungData = await bildResponse.json();
+      } else {
+        setFehler("Nur CSV oder Bild-Dateien (PNG, JPG) werden unterstützt.");
+        setAnalyzing(false);
+        return;
+      }
+
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "abgleich",
+          data: {
+            bestellung: bestellungData,
+            lieferschein: lieferscheinData,
+          },
+        }),
+      });
+
+      const result: AbgleichAnalysis = await response.json();
+      setResults(result);
+
+      localStorage.setItem("abgleichData", JSON.stringify(result));
+
+      if (lieferungId) {
+        await updateLieferung(lieferungId, { abgleich_data: result });
+      }
+    } catch (error) {
+      console.error("Fehler beim Abgleich:", error);
+      setFehler("Fehler beim Abgleich. Bitte erneut versuchen.");
+    } finally {
+      setAnalyzing(false);
     }
   };
 
@@ -57,25 +181,40 @@ export default function AbgleichPage() {
           </div>
 
           <h1 className="mt-4 text-3xl font-bold tracking-tight text-white">
-            Gastronovi CSV hochladen
+            Gastronovi Abgleich
           </h1>
           <p className="mt-3 max-w-xl text-muted">
-            Laden Sie die Gastronovi-Exportdatei im CSV-Format hoch, um die Lieferung automatisch abzugleichen.
+            Laden Sie die Gastronovi-Exportdatei oder einen Screenshot der
+            Bestellung hoch. Die KI gleicht diese automatisch mit dem
+            Lieferschein ab.
           </p>
 
+          {!lieferscheinData && (
+            <div className="mt-6 rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-4">
+              <p className="text-sm text-yellow-400">
+                Kein Lieferschein gefunden. Bitte zuerst Schritt 2 abschließen.
+              </p>
+            </div>
+          )}
+
           <div className="mt-10">
-            <div className="rounded-xl border-2 border-dashed border-border bg-surface-elevated/50 p-12 text-center transition-colors hover:border-accent/50">
+            <div
+              className={`rounded-xl border-2 border-dashed bg-surface-elevated/50 p-12 text-center transition-colors ${
+                dragActive ? "border-accent bg-accent-muted/10" : "border-border hover:border-accent/50"
+              }`}
+              onDragEnter={handleDrag}
+              onDragLeave={handleDrag}
+              onDragOver={handleDrag}
+              onDrop={handleDrop}
+            >
               <input
                 type="file"
-                id="gastronovi-csv"
-                accept=".csv"
+                id="gastronovi-datei"
+                accept=".csv,.png,.jpg,.jpeg"
                 onChange={handleFileChange}
                 className="hidden"
               />
-              <label
-                htmlFor="gastronovi-csv"
-                className="cursor-pointer"
-              >
+              <label htmlFor="gastronovi-datei" className="cursor-pointer">
                 <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-accent-muted/50 text-accent">
                   <svg
                     className="h-8 w-8"
@@ -92,25 +231,140 @@ export default function AbgleichPage() {
                   </svg>
                 </div>
                 <p className="mt-4 text-lg font-medium text-white">
-                  CSV-Datei auswählen
+                  Datei auswählen
                 </p>
                 <p className="mt-2 text-sm text-muted">
-                  .csv bis 5MB
+                  CSV, PNG oder JPG bis 10MB
                 </p>
               </label>
 
               {file && (
-                <div className="mt-6 text-left">
-                  <p className="text-sm font-medium text-white">
-                    Ausgewählte Datei:
-                  </p>
-                  <p className="mt-1 text-sm text-muted">
-                    {file.name}
-                  </p>
+                <div className="mt-6">
+                  <div className="flex items-center justify-between rounded-lg bg-surface p-3">
+                    <p className="text-sm text-muted truncate">{file.name}</p>
+                    <button
+                      onClick={handleRemoveFile}
+                      className="flex h-6 w-6 items-center justify-center rounded-full text-muted transition-colors hover:bg-red-500/20 hover:text-red-400"
+                    >
+                      <svg
+                        className="h-3 w-3"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth={2}
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M6 18 18 6M6 6l12 12"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                  <button
+                    onClick={handleAnalyze}
+                    disabled={analyzing || !lieferscheinData}
+                    className="mt-4 inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
+                  >
+                    {analyzing ? (
+                      <>
+                        <svg
+                          className="h-4 w-4 animate-spin"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                          />
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          />
+                        </svg>
+                        Analysiere...
+                      </>
+                    ) : (
+                      <>
+                        <svg
+                          className="h-4 w-4"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          strokeWidth={2}
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z"
+                          />
+                        </svg>
+                        Analysieren
+                      </>
+                    )}
+                  </button>
                 </div>
               )}
             </div>
           </div>
+
+          {fehler && (
+            <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4">
+              <p className="text-sm text-red-400">{fehler}</p>
+            </div>
+          )}
+
+          {results && (
+            <div className="mt-6 rounded-xl border border-border bg-surface-elevated p-6">
+              <h3 className="text-lg font-semibold text-white">Abgleich-Ergebnis</h3>
+              <div className="mt-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${
+                    results.zusammenfassung.alles_ok
+                      ? "bg-green-500/20 text-green-400"
+                      : "bg-yellow-500/20 text-yellow-400"
+                  }`}>
+                    {results.zusammenfassung.alles_ok ? "✓ Alles OK" : "⚠ Abweichungen"}
+                  </span>
+                  <span className="text-sm text-muted">
+                    {results.zusammenfassung.anzahl_abweichungen} Abweichungen
+                  </span>
+                </div>
+                <p className="text-sm text-muted mb-4">{results.zusammenfassung.hinweis}</p>
+                <div className="space-y-2">
+                  {results.abgleich.map((item, index) => (
+                    <div
+                      key={index}
+                      className={`flex items-center justify-between rounded-lg p-3 ${
+                        item.status === "ok"
+                          ? "bg-green-500/10"
+                          : "bg-yellow-500/10"
+                      }`}
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-white">{item.artikel}</p>
+                        <p className="text-xs text-muted">
+                          Bestellt: {item.bestellt} | Geliefert: {item.geliefert}
+                        </p>
+                      </div>
+                      <span className={`text-xs font-medium ${
+                        item.status === "ok"
+                          ? "text-green-400"
+                          : "text-yellow-400"
+                      }`}>
+                        {item.abweichung !== 0 ? `${item.abweichung > 0 ? '+' : ''}${item.abweichung}` : item.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="mt-8 flex justify-between">
             <a
@@ -132,25 +386,27 @@ export default function AbgleichPage() {
               </svg>
               Zurück
             </a>
-            <a
-              href="/lieferung/rechnung"
-              className="inline-flex items-center gap-2 rounded-lg bg-accent px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent-hover"
-            >
-              Weiter
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                strokeWidth={2}
-                stroke="currentColor"
+            {results && (
+              <a
+                href="/lieferung/rechnung"
+                className="inline-flex items-center gap-2 rounded-lg bg-accent px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent-hover"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"
-                />
-              </svg>
-            </a>
+                Weiter
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={2}
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"
+                  />
+                </svg>
+              </a>
+            )}
           </div>
         </main>
       </div>

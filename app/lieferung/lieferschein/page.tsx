@@ -3,34 +3,69 @@
 import { useState, useEffect } from "react";
 import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
-import { LieferscheinAnalysis, PfandItem } from "../../../lib/types";
+import { LieferscheinAnalysis, PfandAnalysis } from "../../../lib/types";
 import { updateLieferung } from "../../../lib/database";
+import * as pdfjsLib from "pdfjs-dist";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 export default function LieferscheinPage() {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [results, setResults] = useState<LieferscheinAnalysis | null>(null);
-  const [pfandItems, setPfandItems] = useState<PfandItem[]>([]);
+  const [pfandData, setPfandData] = useState<PfandAnalysis | null>(null);
   const [lieferungId, setLieferungId] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const id = localStorage.getItem("lieferungId");
     if (id) {
       setLieferungId(id);
-      // Hier könnten wir die Pfand-Daten aus Supabase laden
-      // Für jetzt nehmen wir an, dass sie im localStorage oder State sind
       const savedPfand = localStorage.getItem("pfandItems");
       if (savedPfand) {
-        setPfandItems(JSON.parse(savedPfand));
+        setPfandData(JSON.parse(savedPfand));
+      }
+      const savedResults = localStorage.getItem("lieferscheinResults");
+      if (savedResults) {
+        setResults(JSON.parse(savedResults));
       }
     }
   }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      const newFiles = Array.from(e.target.files).slice(0, 10);
+      setFiles((prev) => [...prev, ...newFiles].slice(0, 10));
       setResults(null);
     }
+  };
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const newFiles = Array.from(e.dataTransfer.files).slice(0, 10);
+      setFiles((prev) => [...prev, ...newFiles].slice(0, 10));
+      setResults(null);
+    }
+  };
+
+  const handleRemoveFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+    setResults(null);
   };
 
   const fileToBase64 = (file: File): Promise<string> => {
@@ -42,37 +77,97 @@ export default function LieferscheinPage() {
     });
   };
 
-  const handleAnalyze = async () => {
-    if (!file) return;
-
-    setAnalyzing(true);
+  const convertPdfToImages = async (file: File): Promise<string[]> => {
     try {
-      const base64Image = await fileToBase64(file);
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const images: string[] = [];
 
-      const response = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "lieferschein", images: [base64Image] }),
-      });
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const scale = 2;
+        const viewport = page.getViewport({ scale });
 
-      const data = await response.json();
-      setResults(data);
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d");
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
 
-      // In Supabase speichern
-      if (lieferungId) {
-        await updateLieferung(lieferungId, { lieferschein_data: data });
+        await page.render({
+          canvasContext: context!,
+          viewport: viewport,
+          canvas: canvas,
+        }).promise;
+
+        const imageData = canvas.toDataURL("image/jpeg", 0.9);
+        images.push(imageData);
       }
+
+      return images;
     } catch (error) {
-      console.error("Fehler bei der Analyse:", error);
-    } finally {
-      setAnalyzing(false);
+      console.error("Error converting PDF to images:", error);
+      throw new Error("PDF conversion failed. Please use image files instead.");
     }
   };
 
+const handleAnalyze = async () => {
+  if (files.length === 0) return;
+
+  setAnalyzing(true);
+  setError(null);
+  try {
+    const images: string[] = [];
+
+    for (const file of files) {
+      if (file.type === "application/pdf") {
+        try {
+          const pdfImages = await convertPdfToImages(file);
+          images.push(...pdfImages);
+        } catch (pdfError) {
+          console.error("PDF conversion error:", pdfError);
+          setError("PDF-Konvertierung fehlgeschlagen. Bitte verwenden Sie Bilddateien (PNG, JPG).");
+          return;
+        }
+      } else {
+        const base64Image = await fileToBase64(file);
+        images.push(base64Image);
+      }
+    }
+
+    if (images.length === 0) {
+      console.error("No valid images to analyze");
+      setError("Keine gültigen Bilder zum Analysieren gefunden.");
+      setAnalyzing(false);
+      return;
+    }
+
+    const response = await fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "lieferschein", images }),
+    });
+
+    const data = await response.json();
+    setResults(data);
+
+    localStorage.setItem("lieferscheinData", JSON.stringify(data));
+localStorage.setItem("lieferscheinResults", JSON.stringify(data));
+
+if (lieferungId) {
+  await updateLieferung(lieferungId, { lieferschein_data: data });
+}
+  } catch (error) {
+    console.error("Fehler bei der Analyse:", error);
+    setError("Fehler bei der Analyse. Bitte versuchen Sie es erneut.");
+  } finally {
+    setAnalyzing(false);
+  }
+};
+
   const comparePfand = (lieferscheinPfand: any[]) => {
     return lieferscheinPfand.map((item) => {
-      const matchingPfand = pfandItems.find(
-        (p) => p.artikel.toLowerCase() === item.artikel.toLowerCase()
+      const matchingPfand = pfandData?.artikel.find(
+        (p) => p.name.toLowerCase() === item.artikel.toLowerCase()
       );
       const hasDifference = matchingPfand && matchingPfand.menge !== item.menge;
       return { ...item, hasDifference };
@@ -129,12 +224,27 @@ export default function LieferscheinPage() {
             Fotografieren Sie den kompletten Lieferschein und laden Sie das Foto hier hoch.
           </p>
 
+          {error && (
+            <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4">
+              <p className="text-sm text-red-400">{error}</p>
+            </div>
+          )}
+
           <div className="mt-10">
-            <div className="rounded-xl border-2 border-dashed border-border bg-surface-elevated/50 p-12 text-center transition-colors hover:border-accent/50">
+            <div
+              className={`rounded-xl border-2 border-dashed bg-surface-elevated/50 p-12 text-center transition-colors ${
+                dragActive ? "border-accent bg-accent-muted/10" : "border-border hover:border-accent/50"
+              }`}
+              onDragEnter={handleDrag}
+              onDragLeave={handleDrag}
+              onDragOver={handleDrag}
+              onDrop={handleDrop}
+            >
               <input
                 type="file"
                 id="lieferschein-photo"
-                accept="image/*"
+                accept="image/*,.pdf"
+                multiple
                 onChange={handleFileChange}
                 className="hidden"
               />
@@ -163,21 +273,46 @@ export default function LieferscheinPage() {
                   </svg>
                 </div>
                 <p className="mt-4 text-lg font-medium text-white">
-                  Foto auswählen
+                  Fotos auswählen
                 </p>
                 <p className="mt-2 text-sm text-muted">
-                  PNG, JPG bis 10MB
+                  PNG, JPG, PDF bis 10MB (max 10 Dateien)
                 </p>
               </label>
 
-              {file && (
+              {files.length > 0 && (
                 <div className="mt-6 text-left">
                   <p className="text-sm font-medium text-white">
-                    Ausgewählte Datei:
+                    Ausgewählte Dateien ({files.length}/10):
                   </p>
-                  <p className="mt-1 text-sm text-muted">
-                    {file.name}
-                  </p>
+                  <div className="mt-3 space-y-2">
+                    {files.map((file, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center justify-between rounded-lg bg-surface p-3"
+                      >
+                        <p className="text-sm text-muted truncate">{file.name}</p>
+                        <button
+                          onClick={() => handleRemoveFile(index)}
+                          className="flex h-6 w-6 items-center justify-center rounded-full text-muted transition-colors hover:bg-red-500/20 hover:text-red-400"
+                        >
+                          <svg
+                            className="h-3 w-3"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            strokeWidth={2}
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M6 18 18 6M6 6l12 12"
+                            />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                   <button
                     onClick={handleAnalyze}
                     disabled={analyzing}
@@ -332,9 +467,9 @@ export default function LieferscheinPage() {
                       <tbody>
                         {comparePfand(results.pfand_eintrage).map(
                           (item: any, index: number) => {
-                            const matchingPfand = pfandItems.find(
+                            const matchingPfand = pfandData?.artikel.find(
                               (p) =>
-                                p.artikel.toLowerCase() ===
+                                p.name.toLowerCase() ===
                                 item.artikel.toLowerCase()
                             );
                             return (

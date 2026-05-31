@@ -12,6 +12,9 @@
     "@anthropic-ai/sdk": "^0.100.1",
     "@supabase/supabase-js": "^2.106.2",
     "next": "16.2.6",
+    "pdf-lib": "^1.17.1",
+    "pdf-to-img": "^6.1.0",
+    "pdfjs-dist": "^6.0.227",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },

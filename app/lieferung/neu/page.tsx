@@ -1,7 +1,87 @@
+"use client";
+
+import { useState, useEffect } from "react";
 import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
+import { saveLieferung } from "../../../lib/database";
 
 export default function NeueLieferungPage() {
+  const [selectedDate, setSelectedDate] = useState<string>("");
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+
+  useEffect(() => {
+    const today = new Date().toISOString().split("T")[0];
+    setSelectedDate(today);
+    localStorage.setItem("lieferdatum", today);
+
+    // Check if lieferungId already exists, if not create a new Lieferung
+    const existingLieferungId = localStorage.getItem("lieferungId");
+    if (!existingLieferungId) {
+      createNewLieferung();
+    }
+  }, []);
+
+  const createNewLieferung = async () => {
+    try {
+      const result = await saveLieferung({
+        pfand_items: undefined,
+        lieferschein_data: undefined,
+      });
+      if (result && result.id) {
+        localStorage.setItem("lieferungId", result.id);
+      }
+    } catch (error) {
+      console.error("Fehler beim Erstellen der Lieferung:", error);
+    }
+  };
+
+  const handleDateSelect = (date: string) => {
+    setSelectedDate(date);
+    localStorage.setItem("lieferdatum", date);
+    setShowCalendar(false);
+  };
+
+  const isLieferTag = (date: Date) => {
+    const day = date.getDay();
+    return day === 2 || day === 5; // Dienstag (2) oder Freitag (5)
+  };
+
+  const getDaysInMonth = (date: Date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const startDayOfWeek = firstDay.getDay();
+
+    const days = [];
+    for (let i = 0; i < startDayOfWeek; i++) {
+      days.push(null);
+    }
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push(new Date(year, month, i));
+    }
+    return days;
+  };
+
+  const formatDate = (date: Date) => {
+    return date.toISOString().split("T")[0];
+  };
+
+  const formatDisplayDate = (dateString: string) => {
+    if (!dateString) return "";
+    const date = new Date(dateString);
+    return date.toLocaleDateString("de-DE", {
+      weekday: "long",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+  };
+
+  const days = getDaysInMonth(currentMonth);
+
   return (
     <AuthGuard>
       <div className="flex min-h-full flex-col">
@@ -51,6 +131,111 @@ export default function NeueLieferungPage() {
           <p className="mt-3 max-w-xl text-muted">
             Folgen Sie den 5 Schritten, um Ihre Lieferung vollständig zu prüfen.
           </p>
+
+          <div className="mt-8 rounded-xl border border-border bg-surface-elevated p-6">
+            <label className="block text-sm font-medium text-white mb-2">
+              Lieferdatum wählen
+            </label>
+            <div className="relative">
+              <button
+                onClick={() => setShowCalendar(!showCalendar)}
+                className="w-full rounded-lg border border-border bg-surface px-4 py-3 text-left text-white hover:border-accent/50 transition-colors"
+              >
+                {selectedDate ? formatDisplayDate(selectedDate) : "Datum wählen"}
+              </button>
+              {showCalendar && (
+                <div className="absolute z-10 mt-2 w-full rounded-xl border border-border bg-surface-elevated p-4 shadow-lg">
+                  <div className="flex items-center justify-between mb-4">
+                    <button
+                      onClick={() =>
+                        setCurrentMonth(
+                          new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1)
+                        )
+                      }
+                      className="p-2 text-white hover:bg-surface rounded-lg"
+                    >
+                      <svg
+                        className="h-5 w-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth={2}
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M15.75 19.5 8.25 12l7.5-7.5"
+                        />
+                      </svg>
+                    </button>
+                    <span className="text-white font-medium">
+                      {currentMonth.toLocaleDateString("de-DE", {
+                        month: "long",
+                        year: "numeric",
+                      })}
+                    </span>
+                    <button
+                      onClick={() =>
+                        setCurrentMonth(
+                          new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1)
+                        )
+                      }
+                      className="p-2 text-white hover:bg-surface rounded-lg"
+                    >
+                      <svg
+                        className="h-5 w-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth={2}
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="m8.25 4.5 7.5 7.5-7.5 7.5"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-7 gap-1 text-center text-sm">
+                    {["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].map((day) => (
+                      <div key={day} className="text-muted font-medium py-2">
+                        {day}
+                      </div>
+                    ))}
+                    {days.map((day, index) => {
+                      if (!day) {
+                        return <div key={index} className="py-2" />;
+                      }
+                      const isSelected = formatDate(day) === selectedDate;
+                      const isLieferTagDay = isLieferTag(day);
+                      return (
+                        <button
+                          key={index}
+                          onClick={() => handleDateSelect(formatDate(day))}
+                          className={`py-2 rounded-lg transition-colors ${
+                            isSelected
+                              ? "bg-accent text-white"
+                              : isLieferTagDay
+                              ? "bg-green-500/20 text-green-400 hover:bg-green-500/30"
+                              : "text-white hover:bg-surface"
+                          }`}
+                        >
+                          {day.getDate()}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-4 flex items-center gap-4 text-xs text-muted">
+                    <div className="flex items-center gap-1">
+                      <div className="h-3 w-3 rounded bg-green-500/20" />
+                      <span>Liefertage (Di/Fr)</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
 
           <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {[
@@ -163,7 +348,14 @@ export default function NeueLieferungPage() {
               <a
                 key={item.step}
                 href={`/lieferung/${["pfand", "lieferschein", "abgleich", "rechnung", "freigabe"][item.step - 1]}`}
-                className="group rounded-xl border border-border bg-surface-elevated p-6 transition-colors hover:border-accent/50"
+                className={`group rounded-xl border p-6 transition-colors ${
+                  selectedDate
+                    ? "border-border bg-surface-elevated hover:border-accent/50"
+                    : "border-border bg-surface-elevated/50 opacity-50 cursor-not-allowed"
+                }`}
+                onClick={(e) => {
+                  if (!selectedDate) e.preventDefault();
+                }}
               >
                 <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-accent-muted/50 text-accent group-hover:bg-accent group-hover:text-white transition-colors">
                   {item.icon}

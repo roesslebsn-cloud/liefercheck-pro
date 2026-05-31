@@ -3,85 +3,104 @@
 import { useState } from "react";
 import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
-import { PfandItem } from "../../../lib/types";
 import { saveLieferung } from "../../../lib/database";
 
+interface PfandArtikel {
+  id: string;
+  name: string;
+  menge: number;
+}
+
+const vordefinierteArtikel: PfandArtikel[] = [
+  { id: "fass30l", name: "Bierfass 30L", menge: 0 },
+  { id: "kiste05bier", name: "Kiste 0.5L Bier", menge: 0 },
+  { id: "kiste033bier", name: "Kiste 0.33L Bier", menge: 0 },
+  { id: "kiste02soft", name: "Kiste 0.2L Softdrink", menge: 0 },
+  { id: "kiste075wasser", name: "Kiste 0.75L Wasser", menge: 0 },
+  { id: "kiste05wasser", name: "Kiste 0.5L Wasser", menge: 0 },
+  { id: "kiste1lsaft", name: "Kiste 1L Saft", menge: 0 },
+  { id: "kiste1lpet", name: "Kiste 1L PET Softdrink", menge: 0 },
+  { id: "co2", name: "CO2 Flasche", menge: 0 },
+  { id: "biogon", name: "Biogon Flasche", menge: 0 },
+];
+
 export default function PfandPage() {
-  const [files, setFiles] = useState<File[]>([]);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [results, setResults] = useState<PfandItem[] | null>(null);
+  const [artikel, setArtikel] = useState<PfandArtikel[]>(vordefinierteArtikel);
   const [lieferungId, setLieferungId] = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFiles = e.target.files;
-    if (selectedFiles && selectedFiles.length > 0) {
-      setFiles((prev) => [...prev, ...Array.from(selectedFiles)]);
-      setResults(null);
-    }
+  const handleMengeAendern = (id: string, delta: number) => {
+    setArtikel((prev) =>
+      prev.map((a) => {
+        if (a.id === id) {
+          const neueMenge = Math.max(0, a.menge + delta);
+          return { ...a, menge: neueMenge };
+        }
+        return a;
+      })
+    );
   };
 
-  const handleRemoveFile = (index: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
-    setResults(null);
-  };
+  const handleWeiter = async () => {
+    const artikelMitMenge = artikel.filter((a) => a.menge > 0);
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    if (e.dataTransfer.files) {
-      setFiles((prev) => [...prev, ...Array.from(e.dataTransfer.files)]);
-      setResults(null);
-    }
-  };
-
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = (error) => reject(error);
-    });
-  };
-
-  const handleAnalyze = async () => {
-    if (files.length === 0) return;
-
-    setAnalyzing(true);
-    try {
-      const base64Images = await Promise.all(files.map(fileToBase64));
-
-      const response = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "pfand", images: base64Images }),
+    if (artikelMitMenge.length > 0) {
+      const lieferung = await saveLieferung({
+        pfand_items: {
+          artikel: artikelMitMenge.map((a) => ({
+            name: a.name,
+            marke: "",
+            groesse: "",
+            menge: a.menge,
+            typ: "Kiste",
+            stueck_pro_kiste: null,
+            unsicher: false,
+            hinweis: null,
+          })),
+          gesamt_kisten: artikelMitMenge.filter((a) =>
+            a.name.includes("Kiste")
+          ).length,
+          gesamt_faesser: artikelMitMenge.filter((a) => a.name.includes("Fass"))
+            .length,
+          mehrere_bereiche: false,
+          analyse_hinweis: "Manuelle Eingabe",
+        },
       });
-
-      const data = await response.json();
-      if (data.items) {
-        setResults(data.items);
-
-        // In Supabase speichern
-        const lieferung = await saveLieferung({ pfand_items: data.items });
-        setLieferungId(lieferung.id);
-        localStorage.setItem("lieferungId", lieferung.id);
-        localStorage.setItem("pfandItems", JSON.stringify(data.items));
-      }
-    } catch (error) {
-      console.error("Fehler bei der Analyse:", error);
-    } finally {
-      setAnalyzing(false);
+      setLieferungId(lieferung.id);
+      localStorage.setItem("lieferungId", lieferung.id);
+      localStorage.setItem(
+        "pfandItems",
+        JSON.stringify({
+          artikel: artikelMitMenge.map((a) => ({
+            name: a.name,
+            marke: "",
+            groesse: "",
+            menge: a.menge,
+            typ: "Kiste",
+            stueck_pro_kiste: null,
+            unsicher: false,
+            hinweis: null,
+          })),
+          gesamt_kisten: artikelMitMenge.filter((a) =>
+            a.name.includes("Kiste")
+          ).length,
+          gesamt_faesser: artikelMitMenge.filter((a) => a.name.includes("Fass"))
+            .length,
+          mehrere_bereiche: false,
+          analyse_hinweis: "Manuelle Eingabe",
+        })
+      );
+    } else {
+      // Keine Artikel mit Menge > 0, trotzdem ID setzen
+      const lieferung = await saveLieferung({});
+      setLieferungId(lieferung.id);
+      localStorage.setItem("lieferungId", lieferung.id);
     }
+  };
+
+  const handleUeberspringen = async () => {
+    const lieferung = await saveLieferung({});
+    setLieferungId(lieferung.id);
+    localStorage.setItem("lieferungId", lieferung.id);
   };
 
   return (
@@ -121,195 +140,83 @@ export default function PfandPage() {
 
         <ProgressBar currentStep={1} />
 
-        <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-12">
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 sm:py-12">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-accent-muted/50 px-3 py-1 text-xs font-medium text-accent ring-1 ring-accent/20">
             <span className="h-1.5 w-1.5 rounded-full bg-accent" />
             Schritt 1 von 5
           </div>
 
-          <h1 className="mt-4 text-3xl font-bold tracking-tight text-white">
-            Pfandfotos hochladen
+          <h1 className="mt-4 text-2xl font-bold tracking-tight text-white sm:text-3xl">
+            Pfand erfassen
           </h1>
-          <p className="mt-3 max-w-xl text-muted">
-            Fotografieren Sie alle Pfandartikel (Kisten, Kästen, Flaschen) und laden Sie die Bilder hier hoch.
+          <p className="mt-3 max-w-xl text-sm text-muted sm:text-base">
+            Erfassen Sie alle Pfandartikel manuell. Dieser Schritt ist optional.
           </p>
 
-          <div className="mt-10">
-            <div
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              className={`rounded-xl border-2 border-dashed bg-surface-elevated/50 p-12 text-center transition-colors ${
-                isDragging
-                  ? "border-accent bg-accent-muted/20"
-                  : "border-border hover:border-accent/50"
-              }`}
-            >
-              <input
-                type="file"
-                id="pfand-photos"
-                multiple
-                accept="image/*"
-                onChange={handleFileChange}
-                className="hidden"
-              />
-              <label
-                htmlFor="pfand-photos"
-                className="cursor-pointer"
+          <div className="mt-6 rounded-lg bg-accent-muted/20 p-4">
+            <p className="flex items-start gap-2 text-sm text-muted">
+              <svg
+                className="mt-0.5 h-4 w-4 flex-shrink-0 text-accent"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={2}
+                stroke="currentColor"
               >
-                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-accent-muted/50 text-accent">
-                  <svg
-                    className="h-8 w-8"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    strokeWidth={1.5}
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z"
-                    />
-                  </svg>
-                </div>
-                <p className="mt-4 text-lg font-medium text-white">
-                  {isDragging
-                    ? "Dateien hier loslassen"
-                    : "Fotos auswählen oder Drag & Drop"}
-                </p>
-                <p className="mt-2 text-sm text-muted">
-                  PNG, JPG bis 10MB (mehrere Dateien möglich)
-                </p>
-              </label>
-
-              {files.length > 0 && (
-                <div className="mt-6 text-left">
-                  <p className="text-sm font-medium text-white">
-                    {files.length} {files.length === 1 ? "Datei" : "Dateien"} ausgewählt:
-                  </p>
-                  <div className="mt-2 space-y-2">
-                    {files.map((file, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center justify-between rounded-lg bg-surface p-3"
-                      >
-                        <span className="text-sm text-muted">{file.name}</span>
-                        <button
-                          onClick={() => handleRemoveFile(index)}
-                          className="flex h-6 w-6 items-center justify-center rounded-full text-muted transition-colors hover:bg-red-500/20 hover:text-red-400"
-                        >
-                          <svg
-                            className="h-4 w-4"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            strokeWidth={2}
-                            stroke="currentColor"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M6 18 18 6M6 6l12 12"
-                            />
-                          </svg>
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                  <button
-                    onClick={handleAnalyze}
-                    disabled={analyzing}
-                    className="mt-4 inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
-                  >
-                    {analyzing ? (
-                      <>
-                        <svg
-                          className="h-4 w-4 animate-spin"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle
-                            className="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                          />
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                          />
-                        </svg>
-                        Analysiere...
-                      </>
-                    ) : (
-                      <>
-                        <svg
-                          className="h-4 w-4"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          strokeWidth={2}
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z"
-                          />
-                        </svg>
-                        Mit KI analysieren
-                      </>
-                    )}
-                  </button>
-                </div>
-              )}
-            </div>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
+                />
+              </svg>
+              Dieser Schritt ist optional. Sie können den Pfand auch später eintragen.
+            </p>
           </div>
 
-          {results && (
-            <div className="mt-10 rounded-xl border border-border bg-surface-elevated p-6">
-              <h3 className="text-lg font-semibold text-white">
-                Erkannte Pfandartikel
-              </h3>
-              <div className="mt-4 overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border">
-                      <th className="pb-3 text-left font-medium text-muted">
-                        Artikel
-                      </th>
-                      <th className="pb-3 text-left font-medium text-muted">
-                        Menge
-                      </th>
-                      <th className="pb-3 text-left font-medium text-muted">
-                        Typ
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {results.map((item, index) => (
-                      <tr key={index} className="border-b border-border last:border-0">
-                        <td className="py-3 text-white">{item.artikel}</td>
-                        <td className="py-3 text-white">{item.menge}</td>
-                        <td className="py-3 text-white">{item.typ}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {artikel.map((item) => (
+              <div
+                key={item.id}
+                className={`rounded-xl border p-4 transition-colors ${
+                  item.menge > 0
+                    ? "border-accent bg-surface-elevated"
+                    : "border-border bg-surface-elevated/50"
+                }`}
+              >
+                <p className="text-sm font-medium text-white">{item.name}</p>
+                <div className="mt-3 flex items-center justify-between">
+                  <button
+                    onClick={() => handleMengeAendern(item.id, -1)}
+                    disabled={item.menge === 0}
+                    className="flex h-12 w-12 items-center justify-center rounded-lg bg-surface text-2xl font-semibold text-white transition-colors hover:bg-surface-elevated disabled:opacity-30 disabled:hover:bg-surface sm:h-14 sm:w-14"
+                  >
+                    −
+                  </button>
+                  <span className="text-2xl font-semibold text-white sm:text-3xl">
+                    {item.menge}
+                  </span>
+                  <button
+                    onClick={() => handleMengeAendern(item.id, 1)}
+                    className="flex h-12 w-12 items-center justify-center rounded-lg bg-accent text-2xl font-semibold text-white transition-colors hover:bg-accent-hover sm:h-14 sm:w-14"
+                  >
+                    +
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            ))}
+          </div>
 
-          <div className="mt-8 flex justify-end">
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-end">
             <a
               href="/lieferung/lieferschein"
-              className="inline-flex items-center gap-2 rounded-lg bg-accent px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent-hover"
+              onClick={handleUeberspringen}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-surface px-6 py-4 text-sm font-semibold text-white transition-colors hover:bg-surface-elevated sm:px-8 sm:py-3"
+            >
+              Überspringen
+            </a>
+            <a
+              href="/lieferung/lieferschein"
+              onClick={handleWeiter}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-6 py-4 text-sm font-semibold text-white transition-colors hover:bg-accent-hover sm:px-8 sm:py-3"
             >
               Weiter
               <svg
