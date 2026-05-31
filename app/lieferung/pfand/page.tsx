@@ -11,10 +11,36 @@ export default function PfandPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [results, setResults] = useState<PfandItem[] | null>(null);
   const [lieferungId, setLieferungId] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setFiles(Array.from(e.target.files));
+    const selectedFiles = e.target.files;
+    if (selectedFiles && selectedFiles.length > 0) {
+      setFiles((prev) => [...prev, ...Array.from(selectedFiles)]);
+      setResults(null);
+    }
+  };
+
+  const handleRemoveFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+    setResults(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files) {
+      setFiles((prev) => [...prev, ...Array.from(e.dataTransfer.files)]);
       setResults(null);
     }
   };
@@ -109,7 +135,16 @@ export default function PfandPage() {
           </p>
 
           <div className="mt-10">
-            <div className="rounded-xl border-2 border-dashed border-border bg-surface-elevated/50 p-12 text-center transition-colors hover:border-accent/50">
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={`rounded-xl border-2 border-dashed bg-surface-elevated/50 p-12 text-center transition-colors ${
+                isDragging
+                  ? "border-accent bg-accent-muted/20"
+                  : "border-border hover:border-accent/50"
+              }`}
+            >
               <input
                 type="file"
                 id="pfand-photos"
@@ -143,7 +178,9 @@ export default function PfandPage() {
                   </svg>
                 </div>
                 <p className="mt-4 text-lg font-medium text-white">
-                  Fotos auswählen
+                  {isDragging
+                    ? "Dateien hier loslassen"
+                    : "Fotos auswählen oder Drag & Drop"}
                 </p>
                 <p className="mt-2 text-sm text-muted">
                   PNG, JPG bis 10MB (mehrere Dateien möglich)
@@ -155,13 +192,34 @@ export default function PfandPage() {
                   <p className="text-sm font-medium text-white">
                     {files.length} {files.length === 1 ? "Datei" : "Dateien"} ausgewählt:
                   </p>
-                  <ul className="mt-2 space-y-1">
+                  <div className="mt-2 space-y-2">
                     {files.map((file, index) => (
-                      <li key={index} className="text-sm text-muted">
-                        {file.name}
-                      </li>
+                      <div
+                        key={index}
+                        className="flex items-center justify-between rounded-lg bg-surface p-3"
+                      >
+                        <span className="text-sm text-muted">{file.name}</span>
+                        <button
+                          onClick={() => handleRemoveFile(index)}
+                          className="flex h-6 w-6 items-center justify-center rounded-full text-muted transition-colors hover:bg-red-500/20 hover:text-red-400"
+                        >
+                          <svg
+                            className="h-4 w-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            strokeWidth={2}
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M6 18 18 6M6 6l12 12"
+                            />
+                          </svg>
+                        </button>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                   <button
                     onClick={handleAnalyze}
                     disabled={analyzing}
