@@ -47,6 +47,28 @@ export default function DashboardPage() {
             eingehende Waren – schnell, übersichtlich und zuverlässig.
           </p>
 
+          <div className="mt-10">
+            <a
+              href="/lieferung/neu"
+              className="inline-flex items-center gap-3 rounded-xl bg-accent px-8 py-4 text-lg font-semibold text-white transition-colors hover:bg-accent-hover"
+            >
+              <svg
+                className="h-6 w-6"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={2}
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 4.5v15m7.5-7.5h-15"
+                />
+              </svg>
+              Neue Lieferung prüfen
+            </a>
+          </div>
+
           <div className="mt-10 grid gap-4 sm:grid-cols-3">
             {[
               { label: "Offene Lieferungen", value: "—" },
