@@ -59,8 +59,7 @@ export default function PfandPage() {
           gesamt_kisten: artikelMitMenge.filter((a) =>
             a.name.includes("Kiste")
           ).length,
-          gesamt_faesser: artikelMitMenge.filter((a) => a.name.includes("Fass"))
-            .length,
+          gesamt_faesser: artikelMitMenge.filter((a) => a.name.includes("Fass")).length > 0,
           mehrere_bereiche: false,
           analyse_hinweis: "Manuelle Eingabe",
         },
@@ -83,8 +82,7 @@ export default function PfandPage() {
           gesamt_kisten: artikelMitMenge.filter((a) =>
             a.name.includes("Kiste")
           ).length,
-          gesamt_faesser: artikelMitMenge.filter((a) => a.name.includes("Fass"))
-            .length,
+          gesamt_faesser: artikelMitMenge.filter((a) => a.name.includes("Fass")).length > 0,
           mehrere_bereiche: false,
           analyse_hinweis: "Manuelle Eingabe",
         })
