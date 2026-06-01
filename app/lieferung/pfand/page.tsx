@@ -27,6 +27,21 @@ const vordefinierteArtikel: PfandArtikel[] = [
 export default function PfandPage() {
   const [artikel, setArtikel] = useState<PfandArtikel[]>(vordefinierteArtikel);
   const [lieferungId, setLieferungId] = useState<string | null>(null);
+  const [neuerArtikelName, setNeuerArtikelName] = useState("");
+  const [zeigeNeuerArtikel, setZeigeNeuerArtikel] = useState(false);
+
+  const handleArtikelHinzufuegen = () => {
+    const name = neuerArtikelName.trim();
+    if (!name) return;
+    const neuer: PfandArtikel = {
+      id: `custom_${Date.now()}`,
+      name,
+      menge: 0,
+    };
+    setArtikel((prev) => [...prev, neuer]);
+    setNeuerArtikelName("");
+    setZeigeNeuerArtikel(false);
+  };
 
   const handleMengeAendern = (id: string, delta: number) => {
     setArtikel((prev) =>
@@ -145,7 +160,7 @@ export default function PfandPage() {
           </div>
 
           <h1 className="mt-4 text-2xl font-bold tracking-tight text-white sm:text-3xl">
-            Pfand erfassen
+            Pfandliste
           </h1>
           <p className="mt-3 max-w-xl text-sm text-muted sm:text-base">
             Erfassen Sie alle Pfandartikel manuell. Dieser Schritt ist optional.
@@ -201,6 +216,43 @@ export default function PfandPage() {
                 </div>
               </div>
             ))}
+          </div>
+
+          {/* Neuen Artikel hinzufügen */}
+          <div className="mt-6">
+            {zeigeNeuerArtikel ? (
+              <div className="flex gap-3 items-center rounded-xl border border-accent/40 bg-surface-elevated p-4">
+                <input
+                  type="text"
+                  value={neuerArtikelName}
+                  onChange={(e) => setNeuerArtikelName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleArtikelHinzufuegen()}
+                  placeholder="z.B. Kiste 0.5L Bier Weizen"
+                  autoFocus
+                  className="flex-1 rounded-lg bg-surface px-4 py-2 text-sm text-white placeholder:text-muted border border-border focus:outline-none focus:border-accent"
+                />
+                <button
+                  onClick={handleArtikelHinzufuegen}
+                  className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-hover"
+                >
+                  Hinzufügen
+                </button>
+                <button
+                  onClick={() => { setZeigeNeuerArtikel(false); setNeuerArtikelName(""); }}
+                  className="rounded-lg bg-surface px-4 py-2 text-sm text-muted border border-border hover:text-white"
+                >
+                  Abbrechen
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setZeigeNeuerArtikel(true)}
+                className="flex items-center gap-2 rounded-xl border border-dashed border-border bg-surface-elevated/50 px-4 py-3 text-sm text-muted hover:border-accent/50 hover:text-white transition-colors w-full sm:w-auto"
+              >
+                <span className="text-lg font-semibold">+</span>
+                Neuen Artikel hinzufügen
+              </button>
+            )}
           </div>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-end">

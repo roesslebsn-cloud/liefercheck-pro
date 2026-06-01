@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import AuthGuard from "../components/AuthGuard";
 import LogoutButton from "../components/LogoutButton";
 import { getAllLieferungen } from "../../lib/database";
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [lieferungen, setLieferungen] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -216,6 +218,7 @@ export default function DashboardPage() {
                   return (
                     <div
                       key={lieferung.id}
+                      onClick={() => router.push(`/lieferung/detail?id=${lieferung.id}`)}
                       className="rounded-xl border border-border bg-surface-elevated p-6 transition-colors hover:border-accent/50 cursor-pointer"
                     >
                       <div className="flex items-start justify-between">
