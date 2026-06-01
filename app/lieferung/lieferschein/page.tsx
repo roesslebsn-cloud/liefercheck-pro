@@ -7,9 +7,7 @@ import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
 import { LieferscheinAnalysis, PfandAnalysis } from "../../../lib/types";
 import { updateLieferung } from "../../../lib/database";
-import * as pdfjsLib from "pdfjs-dist";
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// pdfjs loaded dynamically to avoid SSR DOMMatrix error
 
 export default function LieferscheinPage() {
   const [files, setFiles] = useState<File[]>([]);
@@ -81,6 +79,8 @@ export default function LieferscheinPage() {
 
   const convertPdfToImages = async (file: File): Promise<string[]> => {
     try {
+      const pdfjsLib = await import("pdfjs-dist");
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
       const images: string[] = [];
