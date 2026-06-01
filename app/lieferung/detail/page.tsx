@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+export const dynamic = "force-dynamic";
+
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
 import { getLieferungById } from "../../../lib/database";
 import { normalizeArtikelKey } from "../../../lib/database";
 
-export default function LieferungDetailPage() {
+function LieferungDetailContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const id = searchParams.get("id");
@@ -289,5 +291,13 @@ export default function LieferungDetailPage() {
         </main>
       </div>
     </AuthGuard>
+  );
+}
+
+export default function LieferungDetailPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><p className="text-muted">Lade...</p></div>}>
+      <LieferungDetailContent />
+    </Suspense>
   );
 }
