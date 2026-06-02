@@ -1,12 +1,9 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
-import { getLieferungById } from "../../../lib/database";
-import { normalizeArtikelKey } from "../../../lib/database";
+import { getLieferungById, deleteLieferung, getUserRole, normalizeArtikelKey } from "../../../lib/database";
 
 function LieferungDetailContent() {
   const router = useRouter();
@@ -15,271 +12,145 @@ function LieferungDetailContent() {
   const [lieferung, setLieferung] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [userRole, setUserRole] = useState<"chef" | "mitarbeiter">("mitarbeiter");
 
   useEffect(() => {
-    if (id) loadLieferung(id);
+    if (id) { loadLieferung(id); getUserRole().then(setUserRole); }
   }, [id]);
 
-  const loadLieferung = async (lieferungId: string) => {
-    try {
-      const data = await getLieferungById(lieferungId);
-      setLieferung(data);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+  const loadLieferung = async (lid: string) => {
+    try { setLieferung(await getLieferungById(lid)); }
+    catch (e) { console.error(e); }
+    finally { setLoading(false); }
   };
 
-  const formatDate = (dateString: string) => {
-    if (!dateString) return "-";
-    return new Date(dateString).toLocaleDateString("de-DE", {
-      day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
-    });
+  const handleDelete = async () => {
+    if (!id) return;
+    setDeleting(true);
+    try { await deleteLieferung(id); router.push("/dashboard"); }
+    finally { setDeleting(false); setShowDelete(false); }
   };
 
-  // Preisabweichungen berechnen
+  const fmt = (d: string) => !d ? "-" : new Date(d).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
   const getPreisabweichungen = () => {
-    const rechnung = lieferung?.rechnung_data;
-    const lieferschein = lieferung?.lieferschein_data;
-    if (!rechnung?.positionen || !lieferschein?.gelieferte_artikel) return [];
-
-    return rechnung.positionen
-      .map((pos: any) => {
-        const rKey = normalizeArtikelKey(pos.artikel);
-        const lPos = lieferschein.gelieferte_artikel.find(
-          (l: any) => normalizeArtikelKey(l.artikel) === rKey
-        );
-        if (!lPos) return null;
-        const rechnungPreis = pos.einzelpreis ?? pos.preis ?? 0;
-        const lieferscheinPreis = lPos.einzelpreis ?? lPos.preis ?? 0;
-        if (lieferscheinPreis > 0 && Math.abs(rechnungPreis - lieferscheinPreis) > 0.01) {
-          return {
-            artikel: pos.artikel,
-            altPreis: lieferscheinPreis,
-            neuPreis: rechnungPreis,
-            differenz: rechnungPreis - lieferscheinPreis,
-            menge: pos.menge ?? lPos.menge ?? 1,
-          };
-        }
-        return null;
-      })
-      .filter(Boolean);
+    const r = lieferung?.rechnung_data;
+    const l = lieferung?.lieferschein_data;
+    if (!r?.positionen || !l?.gelieferte_artikel) return [];
+    return r.positionen.map((pos: any) => {
+      const rKey = normalizeArtikelKey(pos.artikel);
+      const lPos = l.gelieferte_artikel.find((x: any) => normalizeArtikelKey(x.artikel) === rKey);
+      if (!lPos) return null;
+      const rP = pos.einzelpreis ?? pos.preis ?? 0;
+      const lP = lPos.einzelpreis ?? lPos.preis ?? 0;
+      if (lP > 0 && Math.abs(rP - lP) > 0.01) return { artikel: pos.artikel, altPreis: lP, neuPreis: rP, differenz: rP - lP, menge: pos.menge ?? lPos.menge ?? 1 };
+      return null;
+    }).filter(Boolean);
   };
 
-  const exportPreislisteCSV = () => {
-    const abweichungen = getPreisabweichungen();
-    if (abweichungen.length === 0) return;
-    const header = "Artikel;Alter Preis (€);Neuer Preis (€);Differenz (€);Menge";
-    const rows = abweichungen.map((a: any) =>
-      `${a.artikel};${a.altPreis.toFixed(2)};${a.neuPreis.toFixed(2)};${a.differenz.toFixed(2)};${a.menge}`
-    );
-    const csv = [header, ...rows].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
+  const exportCSV = () => {
+    const rows = getPreisabweichungen();
+    if (!rows.length) return;
+    const csv = ["Artikel;Alter Preis;Neuer Preis;Differenz;Menge", ...rows.map((a: any) => `${a.artikel};${a.altPreis.toFixed(2)};${a.neuPreis.toFixed(2)};${a.differenz.toFixed(2)};${a.menge}`)].join("\n");
     const a = document.createElement("a");
-    a.href = url;
-    a.download = `preisabweichungen_${id?.slice(0, 8)}.csv`;
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    a.download = `preise_${id?.slice(0,8)}.csv`;
     a.click();
   };
 
-  const copyAktionsliste = () => {
-    const abweichungen = getPreisabweichungen();
-    if (abweichungen.length === 0) return;
-    const text = abweichungen
-      .map((a: any) =>
-        `• ${a.artikel}: ${a.altPreis.toFixed(2)}€ → ${a.neuPreis.toFixed(2)}€ (${a.differenz > 0 ? "+" : ""}${a.differenz.toFixed(2)}€)`
-      )
-      .join("\n");
-    navigator.clipboard.writeText(`Preise zu aktualisieren:\n\n${text}`);
+  const copyList = () => {
+    const rows = getPreisabweichungen();
+    if (!rows.length) return;
+    const text = rows.map((a: any) => `- ${a.artikel}: ${a.altPreis.toFixed(2)} EUR -> ${a.neuPreis.toFixed(2)} EUR`).join("\n");
+    navigator.clipboard.writeText("Preise aktualisieren:\n\n" + text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  if (loading) {
-    return (
-      <AuthGuard>
-        <div className="flex min-h-screen items-center justify-center">
-          <p className="text-muted">Lade Lieferung...</p>
-        </div>
-      </AuthGuard>
-    );
-  }
+  if (loading) return (
+    <AuthGuard>
+      <div className="flex min-h-screen items-center justify-center bg-[#0a0a0f]">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+      </div>
+    </AuthGuard>
+  );
 
-  if (!lieferung) {
-    return (
-      <AuthGuard>
-        <div className="flex min-h-screen items-center justify-center">
-          <p className="text-muted">Lieferung nicht gefunden.</p>
-        </div>
-      </AuthGuard>
-    );
-  }
+  if (!lieferung) return (
+    <AuthGuard>
+      <div className="flex min-h-screen items-center justify-center bg-[#0a0a0f]">
+        <p className="text-white/40">Lieferung nicht gefunden.</p>
+      </div>
+    </AuthGuard>
+  );
 
   const preisabweichungen = getPreisabweichungen();
   const abgleich = lieferung.abgleich_data?.abgleich ?? [];
 
   return (
     <AuthGuard>
-      <div className="flex min-h-full flex-col">
-        <header className="border-b border-border bg-surface-elevated">
-          <div className="mx-auto flex h-16 max-w-4xl items-center justify-between px-6">
-            <button onClick={() => router.push("/dashboard")} className="flex items-center gap-2 text-muted hover:text-white transition-colors">
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-              </svg>
+      <div className="min-h-screen bg-[#0a0a0f] text-white">
+        <header className="sticky top-0 z-10 border-b border-white/5 bg-[#0a0a0f]/80 backdrop-blur-xl">
+          <div className="mx-auto flex h-14 max-w-4xl items-center justify-between px-4 sm:px-6">
+            <button onClick={() => router.push("/dashboard")} className="flex items-center gap-2 text-sm text-white/40 hover:text-white transition-colors">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" /></svg>
               Zurück
             </button>
-            <h1 className="text-lg font-semibold text-white">
-              Lieferung #{id?.slice(0, 8)}
-            </h1>
-            <span className="text-sm text-muted">{formatDate(lieferung.erstellt_am)}</span>
+            <div className="text-center">
+              <p className="text-sm font-semibold">Lieferung #{id?.slice(0,8)}</p>
+              <p className="text-[11px] text-white/30">{fmt(lieferung.erstellt_am)}</p>
+            </div>
+            {userRole === "chef" ? (
+              <button onClick={() => setShowDelete(true)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg>
+                Löschen
+              </button>
+            ) : <div className="w-20" />}
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-4xl px-6 py-8 space-y-6">
-
-          {/* Zusammenfassung */}
-          <div className="rounded-xl border border-border bg-surface-elevated p-6">
-            <h2 className="text-lg font-semibold text-white mb-4">Zusammenfassung</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div className="rounded-lg bg-surface p-4">
-                <p className="text-xs text-muted mb-1">Ersparnis</p>
-                <p className="text-xl font-bold text-green-400">
-                  {lieferung.ersparnis_eur ? `€${Number(lieferung.ersparnis_eur).toFixed(2)}` : "—"}
-                </p>
+        <main className="mx-auto max-w-4xl px-4 sm:px-6 py-6 space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: "Ersparnis", value: lieferung.ersparnis_eur != null ? "EUR " + Number(lieferung.ersparnis_eur).toFixed(2) : "-", green: true },
+              { label: "Abweichungen", value: String(abgleich.filter((a: any) => a.status !== "ok").length) },
+              { label: "Artikel", value: String(lieferung.lieferschein_data?.gelieferte_artikel?.length ?? "-") },
+              { label: "Rechnungsbetrag", value: lieferung.rechnung_data?.brutto ? "EUR " + lieferung.rechnung_data.brutto.toFixed(2) : "-" },
+            ].map(s => (
+              <div key={s.label} className="rounded-xl border border-white/5 bg-white/[0.02] p-4">
+                <p className="text-[11px] text-white/30 mb-1">{s.label}</p>
+                <p className={"text-lg font-bold " + (s.green ? "text-emerald-400" : "text-white")}>{s.value}</p>
               </div>
-              <div className="rounded-lg bg-surface p-4">
-                <p className="text-xs text-muted mb-1">Abweichungen</p>
-                <p className="text-xl font-bold text-white">
-                  {abgleich.filter((a: any) => a.status !== "ok").length}
-                </p>
-              </div>
-              <div className="rounded-lg bg-surface p-4">
-                <p className="text-xs text-muted mb-1">Artikel</p>
-                <p className="text-xl font-bold text-white">
-                  {lieferung.lieferschein_data?.gelieferte_artikel?.length ?? "—"}
-                </p>
-              </div>
-              <div className="rounded-lg bg-surface p-4">
-                <p className="text-xs text-muted mb-1">Rechnungsbetrag</p>
-                <p className="text-xl font-bold text-white">
-                  {lieferung.rechnung_data?.brutto ? `€${lieferung.rechnung_data.brutto.toFixed(2)}` : "—"}
-                </p>
-              </div>
-            </div>
+            ))}
           </div>
 
-          {/* Schritt 1: Pfandliste */}
-          {lieferung.pfand_items && (
-            <div className="rounded-xl border border-border bg-surface-elevated p-6">
-              <h2 className="text-lg font-semibold text-white mb-4">Schritt 1 · Pfandliste</h2>
-              <div className="space-y-2">
-                {lieferung.pfand_items.artikel?.map((a: any, i: number) => (
-                  <div key={i} className="flex items-center justify-between rounded-lg bg-surface px-4 py-3">
-                    <span className="text-sm text-white">{a.name}</span>
-                    <span className="text-sm font-semibold text-accent">{a.menge}x</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Schritt 2: Lieferschein */}
-          {lieferung.lieferschein_data && (
-            <div className="rounded-xl border border-border bg-surface-elevated p-6">
-              <h2 className="text-lg font-semibold text-white mb-4">Schritt 2 · Lieferschein</h2>
-              <div className="space-y-2">
-                {lieferung.lieferschein_data.gelieferte_artikel?.map((a: any, i: number) => (
-                  <div key={i} className="flex items-center justify-between rounded-lg bg-surface px-4 py-3">
-                    <span className="text-sm text-white">{a.artikel}</span>
-                    <span className="text-sm text-muted">{a.menge}x {a.groesse}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Schritt 3: Abgleich */}
-          {abgleich.length > 0 && (
-            <div className="rounded-xl border border-border bg-surface-elevated p-6">
-              <h2 className="text-lg font-semibold text-white mb-4">Schritt 3 · Abgleich</h2>
-              <div className="space-y-2">
-                {abgleich.map((item: any, i: number) => (
-                  <div key={i} className={`flex items-center justify-between rounded-lg px-4 py-3 ${
-                    item.status === "ok" ? "bg-surface" : "bg-red-500/10 border border-red-500/20"
-                  }`}>
-                    <span className="text-sm text-white">{item.artikel}</span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs text-muted">{item.geliefert}/{item.bestellt}</span>
-                      <span className={`text-xs font-medium ${item.status === "ok" ? "text-green-400" : "text-red-400"}`}>
-                        {item.status === "ok" ? "✓" : `${item.abweichung > 0 ? "+" : ""}${item.abweichung}`}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Schritt 4: Rechnung */}
-          {lieferung.rechnung_data && (
-            <div className="rounded-xl border border-border bg-surface-elevated p-6">
-              <h2 className="text-lg font-semibold text-white mb-4">Schritt 4 · Rechnung</h2>
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div><p className="text-xs text-muted">Lieferant</p><p className="text-sm text-white">{lieferung.rechnung_data.lieferant ?? "—"}</p></div>
-                <div><p className="text-xs text-muted">Rechnungsnr.</p><p className="text-sm text-white">{lieferung.rechnung_data.rechnungs_nummer ?? "—"}</p></div>
-                <div><p className="text-xs text-muted">Netto</p><p className="text-sm text-white">{lieferung.rechnung_data.netto ? `€${lieferung.rechnung_data.netto.toFixed(2)}` : "—"}</p></div>
-                <div><p className="text-xs text-muted">Brutto</p><p className="text-sm font-semibold text-white">{lieferung.rechnung_data.brutto ? `€${lieferung.rechnung_data.brutto.toFixed(2)}` : "—"}</p></div>
-              </div>
-              {lieferung.rechnung_data.positionen?.length > 0 && (
-                <div className="space-y-2">
-                  {lieferung.rechnung_data.positionen.map((pos: any, i: number) => (
-                    <div key={i} className="flex items-center justify-between rounded-lg bg-surface px-4 py-3">
-                      <span className="text-sm text-white">{pos.artikel}</span>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs text-muted">{pos.menge}x</span>
-                        <span className="text-sm text-white">{pos.einzelpreis ? `€${pos.einzelpreis.toFixed(2)}` : ""}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Preisabweichungen */}
           {preisabweichungen.length > 0 && (
-            <div className="rounded-xl border border-orange-500/30 bg-orange-500/5 p-6">
-              <div className="flex items-center justify-between mb-4">
+            <div className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-5">
+              <div className="flex items-start justify-between mb-4">
                 <div>
-                  <h2 className="text-lg font-semibold text-white">Preise zu aktualisieren</h2>
-                  <p className="text-sm text-muted mt-1">Diese Preise haben sich laut Rechnung geändert und müssen im System angepasst werden.</p>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-orange-400 text-sm">Preise aktualisieren</span>
+                    <span className="rounded-full bg-orange-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-orange-400">{preisabweichungen.length}</span>
+                  </div>
+                  <p className="text-xs text-white/30">Diese Artikel haben neue Preise auf der Rechnung.</p>
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={copyAktionsliste}
-                    className="flex items-center gap-2 rounded-lg bg-surface px-3 py-2 text-sm text-white hover:bg-surface-elevated border border-border transition-colors"
-                  >
-                    {copied ? "✓ Kopiert" : "Kopieren"}
+                <div className="flex gap-2 shrink-0">
+                  <button onClick={copyList} className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/10 transition-colors">
+                    {copied ? "Kopiert!" : "Kopieren"}
                   </button>
-                  <button
-                    onClick={exportPreislisteCSV}
-                    className="flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent/80 transition-colors"
-                  >
-                    CSV Export
-                  </button>
+                  <button onClick={exportCSV} className="rounded-lg bg-orange-500/20 px-3 py-1.5 text-xs font-medium text-orange-400 hover:bg-orange-500/30 transition-colors">CSV</button>
                 </div>
               </div>
               <div className="space-y-2">
                 {preisabweichungen.map((a: any, i: number) => (
-                  <div key={i} className="flex items-center justify-between rounded-lg bg-surface px-4 py-3">
+                  <div key={i} className="flex items-center justify-between rounded-lg bg-black/20 px-4 py-3">
                     <span className="text-sm text-white">{a.artikel}</span>
                     <div className="flex items-center gap-3">
-                      <span className="text-sm text-muted line-through">{a.altPreis.toFixed(2)}€</span>
-                      <span className="text-sm font-semibold text-orange-400">{a.neuPreis.toFixed(2)}€</span>
-                      <span className={`text-xs font-medium ${a.differenz > 0 ? "text-red-400" : "text-green-400"}`}>
-                        {a.differenz > 0 ? "+" : ""}{a.differenz.toFixed(2)}€
+                      <span className="text-xs text-white/30 line-through">{a.altPreis.toFixed(2)}</span>
+                      <span className="text-sm font-semibold text-orange-400">{a.neuPreis.toFixed(2)} EUR</span>
+                      <span className={"text-[11px] font-semibold " + (a.differenz > 0 ? "text-red-400" : "text-emerald-400")}>
+                        {a.differenz > 0 ? "+" : ""}{a.differenz.toFixed(2)}
                       </span>
                     </div>
                   </div>
@@ -288,15 +159,102 @@ function LieferungDetailContent() {
             </div>
           )}
 
+          {lieferung.pfand_items?.artikel?.length > 0 && (
+            <Section title="Pfandliste" step="1">
+              {lieferung.pfand_items.artikel.map((a: any, i: number) => (
+                <Row key={i} left={a.name} right={a.menge + "x"} />
+              ))}
+            </Section>
+          )}
+
+          {lieferung.lieferschein_data?.gelieferte_artikel?.length > 0 && (
+            <Section title="Lieferschein" step="2">
+              {lieferung.lieferschein_data.gelieferte_artikel.map((a: any, i: number) => (
+                <Row key={i} left={a.artikel} right={(a.menge + "x " + (a.groesse || "")).trim()} />
+              ))}
+            </Section>
+          )}
+
+          {abgleich.length > 0 && (
+            <Section title="Abgleich" step="3">
+              {abgleich.map((item: any, i: number) => (
+                <div key={i} className={"flex items-center justify-between rounded-lg px-4 py-3 " + (item.status === "ok" ? "bg-white/[0.02]" : "bg-red-500/5 border border-red-500/10")}>
+                  <span className="text-sm text-white">{item.artikel}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-white/30">{item.geliefert}/{item.bestellt}</span>
+                    <span className={"text-xs font-semibold " + (item.status === "ok" ? "text-emerald-400" : "text-red-400")}>
+                      {item.status === "ok" ? "OK" : (item.abweichung > 0 ? "+" : "") + item.abweichung}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </Section>
+          )}
+
+          {lieferung.rechnung_data && (
+            <Section title="Rechnung" step="4">
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                {[["Lieferant", lieferung.rechnung_data.lieferant], ["Rechnungsnr.", lieferung.rechnung_data.rechnungs_nummer], ["Netto", lieferung.rechnung_data.netto ? "EUR " + lieferung.rechnung_data.netto.toFixed(2) : "-"], ["Brutto", lieferung.rechnung_data.brutto ? "EUR " + lieferung.rechnung_data.brutto.toFixed(2) : "-"]].map(([k, v]) => (
+                  <div key={k} className="rounded-lg bg-white/[0.02] px-3 py-2">
+                    <p className="text-[10px] text-white/30 mb-0.5">{k}</p>
+                    <p className="text-sm font-medium text-white">{v || "-"}</p>
+                  </div>
+                ))}
+              </div>
+              {lieferung.rechnung_data.positionen?.map((pos: any, i: number) => (
+                <Row key={i} left={pos.artikel} right={(pos.menge + "x " + (pos.einzelpreis ? "EUR " + pos.einzelpreis.toFixed(2) : "")).trim()} />
+              ))}
+            </Section>
+          )}
         </main>
+
+        {showDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+            <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#111116] p-6 shadow-2xl">
+              <h3 className="text-base font-semibold text-white mb-1">Lieferung löschen?</h3>
+              <p className="text-sm text-white/40 mb-6">Diese Aktion kann nicht rückgängig gemacht werden.</p>
+              <div className="flex gap-3">
+                <button onClick={() => setShowDelete(false)} className="flex-1 rounded-lg border border-white/10 bg-white/5 py-2.5 text-sm font-medium text-white hover:bg-white/10 transition-colors">Abbrechen</button>
+                <button onClick={handleDelete} disabled={deleting} className="flex-1 rounded-lg bg-red-500 py-2.5 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-50 transition-colors">
+                  {deleting ? "Löschen..." : "Ja, löschen"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </AuthGuard>
   );
 }
 
+function Section({ title, step, children }: { title: string; step: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-white/5 bg-white/[0.02] p-5">
+      <div className="flex items-center gap-2 mb-4">
+        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-400">{step}</span>
+        <h2 className="text-sm font-semibold text-white">{title}</h2>
+      </div>
+      <div className="space-y-1.5">{children}</div>
+    </div>
+  );
+}
+
+function Row({ left, right }: { left: string; right: string }) {
+  return (
+    <div className="flex items-center justify-between rounded-lg bg-white/[0.02] px-4 py-2.5">
+      <span className="text-sm text-white">{left}</span>
+      <span className="text-xs text-white/40">{right}</span>
+    </div>
+  );
+}
+
 export default function LieferungDetailPage() {
   return (
-    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><p className="text-muted">Lade...</p></div>}>
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-[#0a0a0f]">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+      </div>
+    }>
       <LieferungDetailContent />
     </Suspense>
   );

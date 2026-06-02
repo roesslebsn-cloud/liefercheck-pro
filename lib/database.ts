@@ -227,3 +227,79 @@ export async function updateUserSettings(data: Partial<UserSettings>) {
     throw error;
   }
 }
+
+export async function deleteLieferung(id: string) {
+  try {
+    const { error } = await supabase
+      .from("lieferungen")
+      .delete()
+      .eq("id", id);
+    if (error) throw error;
+  } catch (error) {
+    console.error("Fehler beim Löschen der Lieferung:", error);
+    throw error;
+  }
+}
+
+export async function getUserRole(): Promise<"chef" | "mitarbeiter"> {
+  try {
+    const settings = await getUserSettings();
+    return (settings?.role as "chef" | "mitarbeiter") || "mitarbeiter";
+  } catch {
+    return "mitarbeiter";
+  }
+}
+
+export async function initUserSettingsIfNeeded() {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data } = await supabase.from("user_settings").select("id").eq("user_id", user.id).single();
+    if (!data) {
+      // First user in the system = chef
+      const { count } = await supabase.from("user_settings").select("*", { count: "exact", head: true });
+      const role = (count === 0 || count === null) ? "chef" : "mitarbeiter";
+      await supabase.from("user_settings").insert({ user_id: user.id, role, wochen_bericht_aktiv: true });
+    }
+  } catch (e) {
+    console.error("initUserSettings error:", e);
+  }
+}
+export async function deleteLieferung(id: string) {
+  try {
+    const { error } = await supabase.from("lieferungen").delete().eq("id", id);
+    if (error) throw error;
+  } catch (error) {
+    console.error("Fehler beim Loeschen:", error);
+    throw error;
+  }
+}
+
+export async function getUserRole(): Promise<"chef" | "mitarbeiter"> {
+  try {
+    const settings = await getUserSettings();
+    return (settings?.role as "chef" | "mitarbeiter") || "mitarbeiter";
+  } catch {
+    return "mitarbeiter";
+  }
+}
+
+export async function initUserSettingsIfNeeded() {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data } = await supabase.from("user_settings").select("id").eq("user_id", user.id).single();
+    if (!data) {
+      const { count } = await supabase.from("user_settings").select("*", { count: "exact", head: true });
+      const role = (count === 0 || count === null) ? "chef" : "mitarbeiter";
+      await supabase.from("user_settings").insert({ user_id: user.id, role, wochen_bericht_aktiv: true });
+    }
+  } catch (e) {
+    console.error("initUserSettings error:", e);
+  }
+}
+    }
+  } catch (e) {
+    console.error("initUserSettings error:", e);
+  }
+}
