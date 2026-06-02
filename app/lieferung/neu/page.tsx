@@ -241,8 +241,8 @@ export default function NeueLieferungPage() {
             {[
               {
                 step: 1,
-                title: "Pfandfotos",
-                description: "Fotografieren Sie alle Pfandartikel",
+                title: "Pfandliste",
+                description: "Erfassen Sie alle Pfandartikel",
                 icon: (
                   <svg
                     className="h-6 w-6"
