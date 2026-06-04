@@ -6,6 +6,7 @@ import AuthGuard from "../components/AuthGuard";
 import LogoutButton from "../components/LogoutButton";
 import { getAllLieferungen, deleteLieferung, getUserRole, initUserSettingsIfNeeded, getStandorte, markZuletztAktiv } from "../../lib/database";
 import { isSuperAdminEmail } from "../../lib/admin";
+import { supabase } from "../../lib/supabase";
 import { Standort } from "../../lib/types";
 import { useCountUp } from "../../lib/useCountUp";
 
