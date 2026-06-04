@@ -277,9 +277,51 @@ CREATE POLICY "Org sieht eigene Standorte"
   );
 
 
+-- ──────────────────────────────────────────────────────────────────────────
+-- MIGRATION 6: Mitarbeiter-Anfragen + temporaeres Passwort
+-- Was:
+--  * Chef stellt Anfrage zur Mitarbeiter-Erstellung -> Admin approved per Email-Link
+--  * user_settings.passwort_temporaer flag fuer roten Banner
+-- ──────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE public.user_settings
+  ADD COLUMN IF NOT EXISTS passwort_temporaer BOOLEAN NOT NULL DEFAULT false;
+
+CREATE TABLE IF NOT EXISTS public.mitarbeiter_anfragen (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organisation_id   UUID NOT NULL REFERENCES public.organisationen(id) ON DELETE CASCADE,
+  angefragt_von     UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  angefragt_von_email TEXT,
+  email             TEXT NOT NULL,
+  vorname           TEXT,
+  passwort          TEXT NOT NULL,
+  rolle             TEXT NOT NULL DEFAULT 'mitarbeiter',
+  status            TEXT NOT NULL DEFAULT 'pending',
+  approval_token    TEXT NOT NULL UNIQUE DEFAULT encode(gen_random_bytes(24), 'hex'),
+  bearbeitet_am     TIMESTAMPTZ,
+  bearbeitet_von    UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  erstellt_am       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.mitarbeiter_anfragen ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Chef sieht eigene Anfragen" ON public.mitarbeiter_anfragen;
+CREATE POLICY "Chef sieht eigene Anfragen"
+  ON public.mitarbeiter_anfragen FOR SELECT
+  USING (organisation_id = public.get_my_organisation() AND is_chef());
+
+DROP POLICY IF EXISTS "Chef erstellt Anfragen" ON public.mitarbeiter_anfragen;
+CREATE POLICY "Chef erstellt Anfragen"
+  ON public.mitarbeiter_anfragen FOR INSERT
+  WITH CHECK (organisation_id = public.get_my_organisation() AND is_chef());
+
+CREATE INDEX IF NOT EXISTS idx_mitarbeiter_anfragen_token ON public.mitarbeiter_anfragen(approval_token);
+CREATE INDEX IF NOT EXISTS idx_mitarbeiter_anfragen_status ON public.mitarbeiter_anfragen(status);
+
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- FERTIG. Pruefe in Supabase Table Editor:
---   - 'organisationen', 'team_einladungen' existieren
---   - 'user_settings' hat vorname, organisation_id, zuletzt_aktiv
+--   - 'organisationen', 'team_einladungen', 'mitarbeiter_anfragen' existieren
+--   - 'user_settings' hat vorname, organisation_id, zuletzt_aktiv, passwort_temporaer
 --   - 'lieferungen', 'lieferanten', 'standorte' haben organisation_id
 -- ═══════════════════════════════════════════════════════════════════════════
