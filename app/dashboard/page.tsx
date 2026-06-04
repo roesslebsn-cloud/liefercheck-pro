@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "../components/AuthGuard";
 import LogoutButton from "../components/LogoutButton";
-import { getAllLieferungen, deleteLieferung, getUserRole, initUserSettingsIfNeeded, getStandorte } from "../../lib/database";
+import { getAllLieferungen, deleteLieferung, getUserRole, initUserSettingsIfNeeded, getStandorte, markZuletztAktiv } from "../../lib/database";
+import { isSuperAdminEmail } from "../../lib/admin";
 import { Standort } from "../../lib/types";
 import { useCountUp } from "../../lib/useCountUp";
 
@@ -46,15 +47,23 @@ export default function DashboardPage() {
   const [filter, setFilter] = useState<Filter>({ status: "alle", datum: "alle", abweichungen: "alle" });
   const [search, setSearch] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => { init(); }, []);
 
   const init = async () => {
     await initUserSettingsIfNeeded();
-    const [data, role, standortData] = await Promise.all([getAllLieferungen(), getUserRole(), getStandorte()]);
+    const [data, role, standortData, { data: { user } }] = await Promise.all([
+      getAllLieferungen(),
+      getUserRole(),
+      getStandorte(),
+      supabase.auth.getUser(),
+    ]);
     setStandorte(standortData);
     setLieferungen(data || []);
     setUserRole(role);
+    setIsAdmin(isSuperAdminEmail(user?.email));
+    markZuletztAktiv();
     setLoading(false);
   };
 
@@ -119,7 +128,9 @@ export default function DashboardPage() {
     { label: "Analyse", path: "/analytics" },
     { label: "Lieferanten", path: "/lieferanten" },
     { label: "Standorte", path: "/standorte" },
-    ...(userRole === "chef" ? [{ label: "Einstellungen", path: "/einstellungen" }] : []),
+    { label: "Team", path: "/team" },
+    { label: "Einstellungen", path: "/einstellungen" },
+    ...(isAdmin ? [{ label: "Admin", path: "/admin" }] : []),
   ];
 
   return (
