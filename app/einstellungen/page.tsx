@@ -15,6 +15,10 @@ export default function EinstellungenPage() {
   const [wochenBerichtAktiv, setWochenBerichtAktiv] = useState(true);
   const [vorname, setVorname] = useState("");
   const [vornameSaved, setVornameSaved] = useState(false);
+  const [newPw, setNewPw] = useState("");
+  const [newPw2, setNewPw2] = useState("");
+  const [pwSubmitting, setPwSubmitting] = useState(false);
+  const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const { supported: pushSupported, subscribed: pushSubscribed, loading: pushLoading, subscribe: pushSubscribe, unsubscribe: pushUnsubscribe } = usePushNotifications();
 
   useEffect(() => {
@@ -75,6 +79,33 @@ export default function EinstellungenPage() {
       window.location.href = "/lieferung/freigabe";
     } catch (error) {
       console.error("Fehler beim Starten der Prüfung:", error);
+    }
+  };
+
+  const handlePasswortChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwMsg(null);
+    if (newPw.length < 8) { setPwMsg({ ok: false, text: "Mind. 8 Zeichen" }); return; }
+    if (newPw !== newPw2) { setPwMsg({ ok: false, text: "Passwörter stimmen nicht überein" }); return; }
+    setPwSubmitting(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch("/api/passwort-aendern", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token}`,
+        },
+        body: JSON.stringify({ neues_passwort: newPw }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Fehler");
+      setPwMsg({ ok: true, text: "Passwort erfolgreich geändert" });
+      setNewPw(""); setNewPw2("");
+    } catch (err: any) {
+      setPwMsg({ ok: false, text: err.message });
+    } finally {
+      setPwSubmitting(false);
     }
   };
 
@@ -175,6 +206,30 @@ export default function EinstellungenPage() {
                 {vornameSaved ? "Gespeichert ✓" : "Speichern"}
               </button>
             </div>
+          </div>
+
+          {/* Passwort ändern */}
+          <div id="passwort" className="mt-10 spotlight-card spotlight-border rounded-xl border border-border bg-surface-elevated p-6 reveal">
+            <h2 className="text-lg font-semibold text-white">Passwort ändern</h2>
+            <p className="mt-2 text-sm text-muted">Setze ein neues Passwort. Wirksam beim nächsten Login.</p>
+            <form onSubmit={handlePasswortChange} className="mt-6 space-y-3 max-w-md">
+              <div>
+                <label className="block text-xs font-medium text-muted mb-1.5">Neues Passwort (min. 8 Zeichen)</label>
+                <input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} minLength={8} className="input" required />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted mb-1.5">Wiederholen</label>
+                <input type="password" value={newPw2} onChange={(e) => setNewPw2(e.target.value)} minLength={8} className="input" required />
+              </div>
+              <button type="submit" disabled={pwSubmitting} className="btn-primary">
+                {pwSubmitting ? "Wird gespeichert..." : "Passwort ändern"}
+              </button>
+              {pwMsg && (
+                <div className={`rounded-md p-3 text-sm ${pwMsg.ok ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
+                  {pwMsg.text}
+                </div>
+              )}
+            </form>
           </div>
 
           {/* Email Forwarding Setup */}

@@ -17,22 +17,10 @@ export default function LoginForm() {
   const [showPw, setShowPw] = useState(false);
   const [autoCheck, setAutoCheck] = useState(true);
 
-  // Auth-Callback-Handler: Wenn User durch Magic-Link kommt
+  // Auto-redirect wenn bereits eingeloggt
   useEffect(() => {
     (async () => {
       try {
-        const hash = window.location.hash || "";
-        const isInviteOrRecovery = hash.includes("type=invite") || hash.includes("type=recovery") || hash.includes("type=signup");
-        const hasAccessToken = hash.includes("access_token");
-
-        // Wenn Token im Hash → Setup-Seite (mit Hash transportiert die Session weiter)
-        if (hasAccessToken) {
-          // Hash bleibt erhalten — supabase-js liest ihn aus
-          window.location.replace("/setup" + hash);
-          return;
-        }
-
-        // Wenn schon eingeloggt (z.B. Refresh) → Dashboard
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
           window.location.replace("/dashboard");
@@ -124,10 +112,6 @@ export default function LoginForm() {
           </>
         ) : "Anmelden"}
       </button>
-
-      <p className="text-center text-[11.5px] text-muted mt-3">
-        Einladung erhalten? Bitte öffne den Link aus der E-Mail um dein Passwort zu setzen.
-      </p>
     </form>
   );
 }

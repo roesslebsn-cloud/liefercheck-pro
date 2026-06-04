@@ -27,6 +27,8 @@ export default function TeamPage() {
 
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteVorname, setInviteVorname] = useState("");
+  const [invitePassword, setInvitePassword] = useState("");
+  const [showInvitePw, setShowInvitePw] = useState(false);
   const [inviteRole, setInviteRole] = useState<"chef" | "mitarbeiter">("mitarbeiter");
   const [inviting, setInviting] = useState(false);
   const [inviteMsg, setInviteMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -63,24 +65,32 @@ export default function TeamPage() {
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inviteEmail) return;
+    if (!inviteEmail || !invitePassword) return;
+    if (invitePassword.length < 8) {
+      setInviteMsg({ ok: false, text: "Passwort muss mind. 8 Zeichen lang sein." });
+      return;
+    }
     setInviting(true);
     setInviteMsg(null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const res = await fetch("/api/invite", {
+      const res = await fetch("/api/anfrage/erstellen", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session?.access_token}`,
         },
-        body: JSON.stringify({ email: inviteEmail, role: inviteRole, vorname: inviteVorname }),
+        body: JSON.stringify({ email: inviteEmail, vorname: inviteVorname, password: invitePassword, rolle: inviteRole }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Fehler");
-      setInviteMsg({ ok: true, text: `Einladung an ${inviteEmail} verschickt.` });
+      setInviteMsg({
+        ok: true,
+        text: `Anfrage gesendet! Admin wurde benachrichtigt. Sobald die Anfrage angenommen ist, kannst du ${inviteEmail} die Login-Daten mitteilen.`
+      });
       setInviteEmail("");
       setInviteVorname("");
+      setInvitePassword("");
       init();
     } catch (err: any) {
       setInviteMsg({ ok: false, text: err.message });
@@ -188,38 +198,50 @@ export default function TeamPage() {
             </div>
           )}
 
-          {/* Einladen */}
+          {/* Mitarbeiter-Anfrage */}
           <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-6">
-            <h2 className="text-sm font-semibold text-white">Mitarbeiter einladen</h2>
-            <p className="mt-1 text-xs text-muted">Verschickt eine Einladungs-Mail mit Magic-Link.</p>
-            <form onSubmit={handleInvite} className="mt-4 grid gap-3 sm:grid-cols-[1fr,1fr,150px,auto]">
-              <input
-                required type="email"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="email@restaurant.de"
-                className="input"
-              />
-              <input
-                value={inviteVorname}
-                onChange={(e) => setInviteVorname(e.target.value)}
-                placeholder="Vorname"
-                className="input"
-              />
-              <select
-                value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value as any)}
-                className="input"
-              >
-                <option value="mitarbeiter">Mitarbeiter</option>
-                <option value="chef">Chef</option>
-              </select>
-              <button type="submit" disabled={inviting} className="btn-primary">
-                {inviting ? "..." : "Einladen"}
+            <h2 className="text-sm font-semibold text-white">Mitarbeiter anlegen</h2>
+            <p className="mt-1 text-xs text-muted">
+              Trage E-Mail, Vorname und ein Passwort ein. Die Anfrage geht an den Admin zur Freigabe.
+              Nach Freigabe kannst du der Person die Login-Daten persönlich mitteilen.
+            </p>
+            <form onSubmit={handleInvite} className="mt-4 space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-[11px] font-medium text-muted mb-1">E-Mail</label>
+                  <input required type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="email@restaurant.de" className="input" />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-muted mb-1">Vorname</label>
+                  <input value={inviteVorname} onChange={(e) => setInviteVorname(e.target.value)} placeholder="z.B. Lisa" className="input" />
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-[1fr,150px]">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-medium text-muted">Passwort (min. 8 Zeichen)</label>
+                    <button type="button" onClick={() => setShowInvitePw(!showInvitePw)} className="text-[10px] text-muted hover:text-white">
+                      {showInvitePw ? "Verbergen" : "Anzeigen"}
+                    </button>
+                  </div>
+                  <input required type={showInvitePw ? "text" : "password"} value={invitePassword} onChange={(e) => setInvitePassword(e.target.value)} minLength={8} placeholder="••••••••" className="input" />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-muted mb-1">Rolle</label>
+                  <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value as any)} className="input">
+                    <option value="mitarbeiter">Mitarbeiter</option>
+                    <option value="chef">Chef</option>
+                  </select>
+                </div>
+              </div>
+              <button type="submit" disabled={inviting} className="btn-primary w-full">
+                {inviting ? "Anfrage wird gesendet..." : "Anfrage an Admin senden"}
               </button>
             </form>
             {inviteMsg && (
-              <p className={`mt-3 text-xs ${inviteMsg.ok ? "text-green-400" : "text-red-400"}`}>{inviteMsg.text}</p>
+              <div className={`mt-3 rounded-lg p-3 text-xs ${inviteMsg.ok ? "bg-green-500/10 text-green-400 border border-green-500/30" : "bg-red-500/10 text-red-400"}`}>
+                {inviteMsg.text}
+              </div>
             )}
           </div>
 
