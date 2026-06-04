@@ -48,8 +48,10 @@ export async function POST(request: NextRequest) {
     if (orgError) throw orgError;
 
     // 2. Magic-Link / Invite an Chef schicken
+    const origin = request.headers.get("origin") || process.env.NEXT_PUBLIC_SITE_URL || "";
     const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
       data: { vorname, organisation_id: org.id, role: "chef" },
+      redirectTo: `${origin}/setup`,
     });
     if (inviteError) throw inviteError;
 

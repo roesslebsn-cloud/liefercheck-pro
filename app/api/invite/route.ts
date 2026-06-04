@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
         vorname: vorname || null,
         organisation_id: inviterSettings.organisation_id,
       },
-      redirectTo: `${origin}/dashboard`,
+      redirectTo: `${origin}/setup`,
     });
 
     if (error) throw error;

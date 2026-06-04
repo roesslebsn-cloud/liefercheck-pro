@@ -86,6 +86,10 @@ export default function LoginForm() {
           </>
         ) : "Anmelden"}
       </button>
+
+      <p className="text-center text-[11.5px] text-muted mt-3">
+        Einladung erhalten? Bitte öffne den Link aus der E-Mail um dein Passwort zu setzen.
+      </p>
     </form>
   );
 }
