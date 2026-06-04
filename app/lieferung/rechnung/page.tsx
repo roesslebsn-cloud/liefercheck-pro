@@ -1,22 +1,46 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
-import { updateLieferung } from "../../../lib/database";
+import { updateLieferung, getLieferungById, getLieferanten } from "../../../lib/database";
+import { normalizeArtikelKey } from "../../../lib/database";
+import { Lieferant } from "../../../lib/types";
 
-export default function RechnungPage() {
+function RechnungPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const lieferungId = searchParams.get("id");
+  const lieferdatum = searchParams.get("date");
+
+  const buildNextUrl = (path: string) => {
+    const params = new URLSearchParams();
+    if (lieferungId) params.set("id", lieferungId);
+    if (lieferdatum) params.set("date", lieferdatum);
+    return `${path}?${params.toString()}`;
+  };
   const [files, setFiles] = useState<File[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [results, setResults] = useState<any>(null);
-  const [lieferungId, setLieferungId] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [preisabweichungen, setPreisabweichungen] = useState<any[]>([]);
+  const [lieferanten, setLieferanten] = useState<Lieferant[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [isXmlMode, setIsXmlMode] = useState(false);
+  const [xmlFile, setXmlFile] = useState<File | null>(null);
 
   useEffect(() => {
-    const id = localStorage.getItem("lieferungId");
-    if (id) setLieferungId(id);
-  }, []);
+    getLieferanten().then(setLieferanten).catch(console.error);
+    if (lieferungId) {
+      getLieferungById(lieferungId).then((lieferung) => {
+        if (lieferung?.rechnung_data) {
+          setResults(lieferung.rechnung_data);
+          if (lieferung.rechnung_data.preisabweichungen) setPreisabweichungen(lieferung.rechnung_data.preisabweichungen);
+        }
+      }).catch(console.error);
+    }
+  }, [lieferungId]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -53,6 +77,52 @@ export default function RechnungPage() {
     setResults(null);
   };
 
+  const handleXmlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setXmlFile(e.target.files[0]);
+      setResults(null);
+      setPreisabweichungen([]);
+    }
+  };
+
+  const handleAnalyzeXml = async () => {
+    if (!xmlFile) return;
+    setAnalyzing(true);
+    setError(null);
+    try {
+      const text = await xmlFile.text();
+      const response = await fetch("/api/erechnung", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ xmlString: text }),
+      });
+      if (!response.ok) throw new Error("XRechnung-Analyse fehlgeschlagen");
+      const result = await response.json();
+      const d = result.daten || result;
+      const normalized = {
+        rechnungs_nummer: d.rechnungsnummer || d.rechnungsNummer || "",
+        datum: d.rechnungsdatum || d.ausstellungsDatum || "",
+        lieferant: d.lieferant?.name || d.verkaeufer?.name || "",
+        netto: d.summen?.nettoGesamt ?? d.gesamtNetto ?? null,
+        mwst: d.summen?.steuerBetrag ?? d.steuerBetrag ?? null,
+        brutto: d.summen?.bruttoGesamt ?? d.gesamtBrutto ?? null,
+        positionen: (d.positionen || []).map((p: any) => ({
+          artikel: p.bezeichnung || p.artikel || "",
+          menge: p.menge ?? 1,
+          einzelpreis: p.einzelpreisNetto ?? p.einzelpreis ?? null,
+          gesamtpreis: p.gesamtpreisNetto ?? p.gesamtpreis ?? null,
+        })),
+        xrechnung: true,
+        format: d.format || "XRechnung",
+      };
+      await applyPreisabgleichAndSave(normalized);
+    } catch (err) {
+      setError("XRechnung-Analyse fehlgeschlagen. Bitte Datei pruefen.");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -85,12 +155,56 @@ export default function RechnungPage() {
     }
   };
 
+  const tryExtractZugferd = async (file: File): Promise<any | null> => {
+    if (file.type !== "application/pdf") return null;
+    try {
+      const base64 = await fileToBase64(file);
+      const response = await fetch("/api/erechnung", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pdfBase64: base64, filename: file.name }),
+      });
+      if (!response.ok) return null;
+      const result = await response.json();
+      if (!result.success || !result.daten) return null;
+      const d = result.daten;
+      return {
+        rechnungs_nummer: d.rechnungsnummer || "",
+        datum: d.rechnungsdatum || "",
+        lieferant: d.lieferant?.name || "",
+        netto: d.summen?.nettoGesamt ?? null,
+        mwst: d.summen?.steuerBetrag ?? null,
+        brutto: d.summen?.bruttoGesamt ?? null,
+        positionen: (d.positionen || []).map((p: any) => ({
+          artikel: p.bezeichnung || "",
+          menge: p.menge ?? 1,
+          einzelpreis: p.einzelpreisNetto ?? null,
+          gesamtpreis: p.gesamtpreisNetto ?? null,
+        })),
+        xrechnung: true,
+        format: d.format || "ZUGFeRD",
+      };
+    } catch {
+      return null;
+    }
+  };
+
   const handleAnalyze = async () => {
     if (files.length === 0) return;
 
     setAnalyzing(true);
     setError(null);
     try {
+      // 1) Try ZUGFeRD auto-detection on PDFs first - kostenlos und exakt
+      for (const file of files) {
+        const zugferdData = await tryExtractZugferd(file);
+        if (zugferdData) {
+          await applyPreisabgleichAndSave(zugferdData);
+          return;
+        }
+      }
+
+      // 2) Fallback to KI-Analyse for image PDFs or pictures
       const images: string[] = [];
 
       for (const file of files) {
@@ -121,20 +235,54 @@ export default function RechnungPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "rechnung", images }),
       });
-
       const data = await response.json();
-      setResults(data);
-
-      localStorage.setItem("rechnungData", JSON.stringify(data));
-
-      if (lieferungId) {
-        await updateLieferung(lieferungId, { rechnung_data: data });
-      }
+      await applyPreisabgleichAndSave(data);
     } catch (error) {
       console.error("Fehler bei der Analyse:", error);
       setError("Fehler bei der Analyse. Bitte versuchen Sie es erneut.");
     } finally {
       setAnalyzing(false);
+    }
+  };
+
+  const applyPreisabgleichAndSave = async (data: any) => {
+    setResults(data);
+
+    let abweichungen: any[] = [];
+    if (data.positionen && lieferanten.length > 0) {
+      const matchedLieferant = lieferanten.find(l =>
+        data.lieferant && l.name.toLowerCase().includes(data.lieferant.toLowerCase().split(" ")[0])
+      );
+      if (matchedLieferant?.preisliste && Object.keys(matchedLieferant.preisliste).length > 0) {
+        data.positionen.forEach((pos: any) => {
+          const posKey = normalizeArtikelKey(pos.artikel);
+          const preisEintrag = Object.entries(matchedLieferant.preisliste!).find(
+            ([artikel]) => normalizeArtikelKey(artikel) === posKey
+          );
+          if (preisEintrag && pos.einzelpreis) {
+            const rawPreis = preisEintrag[1] as any;
+            const listePreis = typeof rawPreis === "object" ? rawPreis.einzelpreis : rawPreis;
+            if (!listePreis) return;
+            const diff = Math.abs(pos.einzelpreis - listePreis);
+            const diffProzent = (diff / listePreis) * 100;
+            if (diffProzent > 1) {
+              abweichungen.push({
+                artikel: pos.artikel,
+                preis_rechnung: pos.einzelpreis,
+                preis_liste: listePreis,
+                abweichung_eur: +(pos.einzelpreis - listePreis).toFixed(2),
+                abweichung_prozent: +diffProzent.toFixed(1),
+              });
+            }
+          }
+        });
+      }
+    }
+    setPreisabweichungen(abweichungen);
+
+    const rechnungDataMitAbweichungen = { ...data, preisabweichungen: abweichungen };
+    if (lieferungId) {
+      await updateLieferung(lieferungId, { rechnung_data: rechnungDataMitAbweichungen });
     }
   };
 
@@ -173,7 +321,7 @@ export default function RechnungPage() {
           </div>
         </header>
 
-        <ProgressBar currentStep={4} />
+        <ProgressBar currentStep={4} lieferungId={lieferungId} lieferdatum={lieferdatum} />
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-12">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-accent-muted/50 px-3 py-1 text-xs font-medium text-accent ring-1 ring-accent/20">
@@ -195,6 +343,43 @@ export default function RechnungPage() {
           )}
 
           <div className="mt-10">
+            <div className="flex gap-1 rounded-xl border border-border bg-surface p-1 w-fit mb-2">
+              <button
+                onClick={() => { setIsXmlMode(false); setXmlFile(null); setResults(null); setPreisabweichungen([]); }}
+                className={`rounded-lg px-4 py-2 text-sm font-medium transition-all ${!isXmlMode ? "bg-accent text-white shadow" : "text-muted hover:text-white"}`}
+              >PDF / Foto</button>
+              <button
+                onClick={() => { setIsXmlMode(true); setFiles([]); setResults(null); setPreisabweichungen([]); }}
+                className={`rounded-lg px-4 py-2 text-sm font-medium transition-all ${isXmlMode ? "bg-accent text-white shadow" : "text-muted hover:text-white"}`}
+              >XRechnung (XML)</button>
+            </div>
+            <p className="text-xs text-muted mb-4">
+              PDFs werden automatisch auf eingebettete E-Rechnung (ZUGFeRD) geprueft - falls vorhanden, kostenlos und exakt verarbeitet.
+            </p>
+
+            {isXmlMode ? (
+              <div className="rounded-xl border-2 border-dashed border-border bg-surface-elevated/50 p-12 text-center">
+                <input type="file" id="rechnung-xml" accept=".xml,.pdf" onChange={handleXmlChange} className="hidden" />
+                <label htmlFor="rechnung-xml" className="cursor-pointer">
+                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-accent-muted/50 text-accent">
+                    <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5" />
+                    </svg>
+                  </div>
+                  <p className="mt-4 text-lg font-medium text-white">XRechnung oder ZUGFeRD-PDF auswaehlen</p>
+                  <p className="mt-2 text-sm text-muted">.xml · ZUGFeRD PDF</p>
+                </label>
+                {xmlFile && (
+                  <div className="mt-6">
+                    <p className="text-sm text-muted mb-3">Ausgewaehlt: <span className="text-white">{xmlFile.name}</span></p>
+                    <button onClick={handleAnalyzeXml} disabled={analyzing}
+                      className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-hover disabled:opacity-50 transition-colors">
+                      {analyzing ? "Analysiere..." : "XRechnung parsen"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
             <div
               className={`rounded-xl border-2 border-dashed bg-surface-elevated/50 p-12 text-center transition-colors ${
                 dragActive ? "border-accent bg-accent-muted/10" : "border-border hover:border-accent/50"
@@ -322,7 +507,31 @@ export default function RechnungPage() {
                 </div>
               )}
             </div>
+            )}
           </div>
+
+          {results?.xrechnung && (
+            <div className="mt-6 flex items-center gap-3 rounded-xl border border-green-500/30 bg-green-500/10 p-4">
+              <svg className="h-6 w-6 text-green-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+              </svg>
+              <div>
+                <p className="text-sm font-semibold text-green-400">E-Rechnung erkannt ({results.format || "ZUGFeRD"})</p>
+                <p className="text-xs text-muted mt-0.5">Daten direkt aus dem strukturierten Format gelesen - 100% exakt, ohne KI-Kosten.</p>
+              </div>
+            </div>
+          )}
+          {results && !results.xrechnung && (
+            <div className="mt-6 flex items-center gap-3 rounded-xl border border-blue-500/30 bg-blue-500/10 p-4">
+              <svg className="h-6 w-6 text-blue-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z" />
+              </svg>
+              <div>
+                <p className="text-sm font-semibold text-blue-400">KI-Analyse durchgefuehrt</p>
+                <p className="text-xs text-muted mt-0.5">Tipp: Wenn Ihr Lieferant ZUGFeRD-PDFs anbietet, werden diese automatisch kostenlos erkannt.</p>
+              </div>
+            </div>
+          )}
 
           {results && (
             <div className="mt-10 rounded-xl border border-border bg-surface-elevated p-6">
@@ -395,9 +604,44 @@ export default function RechnungPage() {
             </div>
           )}
 
+          {preisabweichungen.length > 0 && (
+            <div className="mt-6 rounded-xl border border-orange-500/30 bg-orange-500/10 p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <svg className="h-5 w-5 text-orange-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                </svg>
+                <h4 className="text-sm font-semibold text-orange-400">{preisabweichungen.length} Preisabweichung(en) zur Preisliste</h4>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-orange-500/20">
+                      <th className="pb-2 text-left font-medium text-muted">Artikel</th>
+                      <th className="pb-2 text-right font-medium text-muted">Rechnung</th>
+                      <th className="pb-2 text-right font-medium text-muted">Preisliste</th>
+                      <th className="pb-2 text-right font-medium text-muted">Abweichung</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preisabweichungen.map((a: any, i: number) => (
+                      <tr key={i} className="border-b border-orange-500/10 last:border-0">
+                        <td className="py-2 text-white">{a.artikel}</td>
+                        <td className="py-2 text-right text-white">€{a.preis_rechnung.toFixed(2)}</td>
+                        <td className="py-2 text-right text-muted">€{a.preis_liste.toFixed(2)}</td>
+                        <td className={"py-2 text-right font-medium " + (a.abweichung_eur > 0 ? "text-red-400" : "text-green-400")}>
+                          {a.abweichung_eur > 0 ? "+" : ""}{a.abweichung_eur.toFixed(2)} € ({a.abweichung_prozent}%)
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           <div className="mt-8 flex justify-between">
             <a
-              href="/lieferung/abgleich"
+              href={buildNextUrl("/lieferung/abgleich")}
               className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-surface-elevated"
             >
               <svg
@@ -416,7 +660,7 @@ export default function RechnungPage() {
               Zurück
             </a>
             <a
-              href="/lieferung/freigabe"
+              href={buildNextUrl("/lieferung/freigabe")}
               className="inline-flex items-center gap-2 rounded-lg bg-accent px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent-hover"
             >
               Weiter
@@ -438,5 +682,13 @@ export default function RechnungPage() {
         </main>
       </div>
     </AuthGuard>
+  );
+}
+
+export default function RechnungPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" /></div>}>
+      <RechnungPageContent />
+    </Suspense>
   );
 }

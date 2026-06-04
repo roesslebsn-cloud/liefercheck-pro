@@ -19,7 +19,7 @@ export default function LogoutButton() {
       type="button"
       onClick={handleLogout}
       disabled={isLoading}
-      className="rounded-lg border border-border px-4 py-2 text-sm text-zinc-400 transition-colors hover:border-zinc-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-70"
+      className="btn-ghost disabled:opacity-50"
     >
       {isLoading ? "Wird abgemeldet…" : "Abmelden"}
     </button>

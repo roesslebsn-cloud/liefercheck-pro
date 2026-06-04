@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
+import AppHeader from "../../components/AppHeader";
 import { getLieferungById, deleteLieferung, getUserRole, normalizeArtikelKey } from "../../../lib/database";
 
 function LieferungDetailContent() {
@@ -16,6 +17,8 @@ function LieferungDetailContent() {
   const [deleting, setDeleting] = useState(false);
   const [userRole, setUserRole] = useState<"chef" | "mitarbeiter">("mitarbeiter");
   const [openStep, setOpenStep] = useState<number | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [datevLoading, setDatevLoading] = useState(false);
 
   useEffect(() => {
     if (id) { loadLieferung(id); getUserRole().then(setUserRole); }
@@ -32,6 +35,54 @@ function LieferungDetailContent() {
     setDeleting(true);
     try { await deleteLieferung(id); router.push("/dashboard"); }
     finally { setDeleting(false); setShowDelete(false); }
+  };
+
+  const handleExportPDF = async () => {
+    if (!lieferung) return;
+    setPdfLoading(true);
+    try {
+      const res = await fetch("/api/pdf-export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lieferung }),
+      });
+      if (!res.ok) throw new Error("PDF-Fehler");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `lieferbericht-${(lieferung.id || "").slice(0,8)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("PDF-Export fehlgeschlagen");
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  const handleExportDATEV = async () => {
+    if (!lieferung) return;
+    setDatevLoading(true);
+    try {
+      const res = await fetch("/api/datev-export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lieferung }),
+      });
+      if (!res.ok) throw new Error("DATEV-Fehler");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `datev-${(lieferung.id || "").slice(0,8)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("DATEV-Export fehlgeschlagen");
+    } finally {
+      setDatevLoading(false);
+    }
   };
 
   const fmt = (d: string) => !d ? "-" : new Date(d).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -199,27 +250,45 @@ function LieferungDetailContent() {
 
   return (
     <AuthGuard>
-      <div className="min-h-screen bg-[#0a0a0f] text-white">
-        <header className="sticky top-0 z-10 border-b border-white/5 bg-[#0a0a0f]/80 backdrop-blur-xl">
-          <div className="mx-auto flex h-14 max-w-4xl items-center justify-between px-4 sm:px-6">
-            <button onClick={() => router.push("/dashboard")} className="flex items-center gap-2 text-sm text-white/40 hover:text-white transition-colors">
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" /></svg>
+      <div className="min-h-screen relative">
+        <div className="aurora-bg" />
+        <AppHeader />
+
+        <main className="mx-auto max-w-[1000px] px-5 sm:px-8 pt-10 pb-20 space-y-5 relative">
+          <div className="flex items-center justify-between gap-4 mb-2 reveal">
+            <button onClick={() => router.push("/dashboard")} className="btn-ghost">
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+              </svg>
               Zurück
             </button>
-            <div className="text-center">
-              <p className="text-sm font-semibold">Lieferung #{id?.slice(0,8)}</p>
-              <p className="text-[11px] text-white/30">{fmt(lieferung.erstellt_am)}</p>
+            <div className="text-center min-w-0">
+              <p className="text-[14px] font-semibold text-white truncate">Lieferung #{id?.slice(0,8)}</p>
+              <p className="text-[11px] text-muted">{fmt(lieferung.erstellt_am)}</p>
             </div>
-            {isChef ? (
-              <button onClick={() => setShowDelete(true)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors">
-                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg>
-                Löschen
+            <div className="flex items-center gap-2">
+              <button onClick={handleExportPDF} disabled={pdfLoading} className="btn-secondary" title="Als PDF speichern">
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0 1 10.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0 .229 2.523a1.125 1.125 0 0 1-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0 0 21 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 0 0-1.913-.247M6.34 18H5.25A2.25 2.25 0 0 1 3 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 0 1 1.913-.247m10.5 0a48.536 48.536 0 0 0-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5Zm-3 0h.008v.008H15V10.5Z" />
+                </svg>
+                {pdfLoading ? "Generiere…" : "PDF"}
               </button>
-            ) : <div className="w-20" />}
+              {lieferung?.status === "abgeschlossen" && lieferung?.rechnung_data && (
+                <button onClick={handleExportDATEV} disabled={datevLoading} className="btn-secondary" title="DATEV EXTF exportieren">
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                  </svg>
+                  {datevLoading ? "Exportiere…" : "DATEV"}
+                </button>
+              )}
+              {isChef && (
+                <button onClick={() => setShowDelete(true)}
+                  className="rounded-md border border-red-500/30 px-3 py-1.5 text-[12.5px] font-medium text-red-400 hover:bg-red-500/10 hover:border-red-500/50 transition-all">
+                  Löschen
+                </button>
+              )}
+            </div>
           </div>
-        </header>
-
-        <main className="mx-auto max-w-4xl px-4 sm:px-6 py-6 space-y-4">
           {/* Summary stats */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[

@@ -66,6 +66,10 @@ export interface Lieferung {
   abgleich_data?: AbgleichAnalysis;
   rechnung_data?: any;
   ersparnis_eur?: number;
+  freigabe_erteilt?: boolean;
+  freigabe_am?: string;
+  lieferant_id?: string;
+  standort_id?: string;
 }
 
 export interface EingehendeRechnung {
@@ -83,4 +87,27 @@ export interface UserSettings {
   id?: string;
   user_id?: string;
   wochen_bericht_aktiv?: boolean;
+}
+
+export interface Lieferant {
+  id?: string;
+  user_id?: string;
+  name: string;
+  email?: string;
+  telefon?: string;
+  iban?: string;
+  kundennummer?: string;
+  liefertage?: string[];
+  preisliste?: Record<string, number>;
+  aktiv?: boolean;
+  erstellt_am?: string;
+}
+
+export interface Standort {
+  id?: string;
+  user_id?: string;
+  name: string;
+  adresse?: string;
+  aktiv?: boolean;
+  erstellt_am?: string;
 }

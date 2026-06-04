@@ -2,36 +2,41 @@
 
 export const dynamic = "force-dynamic";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
 import { LieferscheinAnalysis, PfandAnalysis } from "../../../lib/types";
-import { updateLieferung } from "../../../lib/database";
+import { updateLieferung, getLieferungById } from "../../../lib/database";
 // pdfjs loaded dynamically to avoid SSR DOMMatrix error
 
-export default function LieferscheinPage() {
+function LieferscheinPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const lieferungId = searchParams.get("id");
+  const lieferdatum = searchParams.get("date");
+
+  const buildNextUrl = (path: string) => {
+    const params = new URLSearchParams();
+    if (lieferungId) params.set("id", lieferungId);
+    if (lieferdatum) params.set("date", lieferdatum);
+    return `${path}?${params.toString()}`;
+  };
   const [files, setFiles] = useState<File[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [results, setResults] = useState<LieferscheinAnalysis | null>(null);
   const [pfandData, setPfandData] = useState<PfandAnalysis | null>(null);
-  const [lieferungId, setLieferungId] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const id = localStorage.getItem("lieferungId");
-    if (id) {
-      setLieferungId(id);
-      const savedPfand = localStorage.getItem("pfandItems");
-      if (savedPfand) {
-        setPfandData(JSON.parse(savedPfand));
-      }
-      const savedResults = localStorage.getItem("lieferscheinResults");
-      if (savedResults) {
-        setResults(JSON.parse(savedResults));
-      }
+    if (lieferungId) {
+      getLieferungById(lieferungId).then((lieferung) => {
+        if (lieferung?.pfand_items) setPfandData(lieferung.pfand_items);
+        if (lieferung?.lieferschein_data) setResults(lieferung.lieferschein_data);
+      }).catch(console.error);
     }
-  }, []);
+  }, [lieferungId]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -152,12 +157,9 @@ const handleAnalyze = async () => {
     const data = await response.json();
     setResults(data);
 
-    localStorage.setItem("lieferscheinData", JSON.stringify(data));
-localStorage.setItem("lieferscheinResults", JSON.stringify(data));
-
-if (lieferungId) {
-  await updateLieferung(lieferungId, { lieferschein_data: data });
-}
+        if (lieferungId) {
+      await updateLieferung(lieferungId, { lieferschein_data: data });
+    }
   } catch (error) {
     console.error("Fehler bei der Analyse:", error);
     setError("Fehler bei der Analyse. Bitte versuchen Sie es erneut.");
@@ -211,7 +213,7 @@ if (lieferungId) {
           </div>
         </header>
 
-        <ProgressBar currentStep={2} />
+        <ProgressBar currentStep={2} lieferungId={lieferungId} lieferdatum={lieferdatum} />
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-12">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-accent-muted/50 px-3 py-1 text-xs font-medium text-accent ring-1 ring-accent/20">
@@ -246,6 +248,7 @@ if (lieferungId) {
                 type="file"
                 id="lieferschein-photo"
                 accept="image/*,.pdf"
+                capture="environment"
                 multiple
                 onChange={handleFileChange}
                 className="hidden"
@@ -543,7 +546,7 @@ if (lieferungId) {
 
           <div className="mt-8 flex justify-between">
             <a
-              href="/lieferung/pfand"
+              href={buildNextUrl("/lieferung/pfand")}
               className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-surface-elevated"
             >
               <svg
@@ -562,7 +565,7 @@ if (lieferungId) {
               Zurück
             </a>
             <a
-              href="/lieferung/abgleich"
+              href={buildNextUrl("/lieferung/abgleich")}
               className="inline-flex items-center gap-2 rounded-lg bg-accent px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent-hover"
             >
               Weiter
@@ -584,5 +587,13 @@ if (lieferungId) {
         </main>
       </div>
     </AuthGuard>
+  );
+}
+
+export default function LieferscheinPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" /></div>}>
+      <LieferscheinPageContent />
+    </Suspense>
   );
 }

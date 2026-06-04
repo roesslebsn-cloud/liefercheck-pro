@@ -1,16 +1,22 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
-import { getAllLieferungen, updateLieferung, calculateErsparnis } from "../../../lib/database";
+import { getLieferungById, updateLieferung, calculateErsparnis } from "../../../lib/database";
+import { supabase } from "../../../lib/supabase";
 
-export default function FreigabePage() {
+function FreigabePageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const lieferungId = searchParams.get("id");
+  const lieferdatum = searchParams.get("date");
   const [notiz, setNotiz] = useState("");
   const [photos, setPhotos] = useState<File[]>([]);
-  const [lastLieferung, setLastLieferung] = useState<any>(null);
   const [currentLieferung, setCurrentLieferung] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
+  const lastLieferung: any = null; // comparison with previous delivery removed
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [abgleichData, setAbgleichData] = useState<any>(null);
   const [lieferscheinData, setLieferscheinData] = useState<any>(null);
@@ -34,47 +40,20 @@ export default function FreigabePage() {
   };
 
   useEffect(() => {
-    loadLieferungen();
-    loadLocalStorageData();
-  }, []);
-
-  const loadLocalStorageData = () => {
-    try {
-      const abgleich = localStorage.getItem("abgleichData");
-      if (abgleich) setAbgleichData(JSON.parse(abgleich));
-
-      const lieferschein = localStorage.getItem("lieferscheinData");
-      if (lieferschein) {
-        const parsed = JSON.parse(lieferschein);
-        setLieferscheinData(parsed);
-        console.log("DEBUG lieferscheinData:", parsed);
-      }
-
-      const rechnung = localStorage.getItem("rechnungData");
-      if (rechnung) {
-        const parsed = JSON.parse(rechnung);
-        setRechnungData(parsed);
-        console.log("DEBUG rechnungData:", parsed);
-      }
-
-      const pfand = localStorage.getItem("pfandItems");
-      if (pfand) setPfandItems(JSON.parse(pfand));
-    } catch (error) {
-      console.error("Fehler beim Laden der localStorage Daten:", error);
+    if (lieferungId) {
+      getLieferungById(lieferungId).then((lieferung) => {
+        if (lieferung) {
+          setCurrentLieferung(lieferung);
+          if (lieferung.abgleich_data) setAbgleichData(lieferung.abgleich_data);
+          if (lieferung.lieferschein_data) setLieferscheinData(lieferung.lieferschein_data);
+          if (lieferung.rechnung_data) setRechnungData(lieferung.rechnung_data);
+          if (lieferung.pfand_items) setPfandItems(lieferung.pfand_items);
+        }
+      }).catch(console.error).finally(() => setLoading(false));
+    } else {
+      setLoading(false);
     }
-  };
-
-  const loadLieferungen = async () => {
-    try {
-      const data = await getAllLieferungen();
-      if (data && data.length > 0) {
-        setLastLieferung(data[0]);
-        setCurrentLieferung(data[0]);
-      }
-    } catch (error) {
-      console.error("Fehler beim Laden der Lieferungen:", error);
-    }
-  };
+  }, [lieferungId]);
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -87,41 +66,8 @@ export default function FreigabePage() {
   };
 
   const handleFreigabe = async () => {
-    let lieferungId: string | null = null;
-    try {
-      lieferungId = localStorage.getItem("lieferungId");
-    } catch (error) {
-      console.error("Fehler beim Lesen von lieferungId aus localStorage:", error);
-    }
-    
     if (!lieferungId) {
-      // Fallback: try to get most recent Lieferung from database
-      try {
-        const lieferungen = await getAllLieferungen();
-        if (lieferungen && lieferungen.length > 0 && lieferungen[0].id) {
-          lieferungId = lieferungen[0].id;
-          if (lieferungId) localStorage.setItem("lieferungId", lieferungId);
-        } else {
-          // Create new Lieferung as last resort using saveLieferung
-          const { saveLieferung } = await import("../../../lib/database");
-          const result = await saveLieferung({
-            pfand_items: undefined,
-            lieferschein_data: undefined,
-            status: "abgeschlossen",
-            notiz: notiz,
-          });
-          if (result && result.id) {
-            lieferungId = result.id;
-            if (lieferungId) localStorage.setItem("lieferungId", lieferungId);
-          }
-        }
-      } catch (error) {
-        console.error("Fehler beim Abrufen der Lieferungen:", error);
-      }
-    }
-    
-    if (!lieferungId) {
-      setError("Lieferung ID konnte nicht gefunden werden. Bitte starten Sie den Prozess neu.");
+      setError("Lieferung ID fehlt. Bitte starten Sie den Prozess neu.");
       return;
     }
 
@@ -129,30 +75,40 @@ export default function FreigabePage() {
     setError(null);
 
     try {
-      // Calculate ersparnis before saving
-      const ersparnis = calculateErsparnis(rechnungData, lieferscheinData);
-      
-      await updateLieferung(lieferungId, { 
-        status: "abgeschlossen", 
+      const ersparnis = calculateErsparnis(rechnungData, lieferscheinData, abgleichData);
+
+      await updateLieferung(lieferungId, {
+        status: "abgeschlossen",
         notiz: notiz,
-        ersparnis_eur: ersparnis
+        ersparnis_eur: ersparnis,
+        freigabe_erteilt: true,
+        freigabe_am: new Date().toISOString()
       });
 
-      // Clear localStorage
-      try {
-        localStorage.removeItem("lieferungId");
-        localStorage.removeItem("lieferscheinData");
-        localStorage.removeItem("lieferscheinResults");
-        localStorage.removeItem("rechnungData");
-        localStorage.removeItem("pfandItems");
-        localStorage.removeItem("lieferdatum");
-        localStorage.removeItem("abgleichData");
-      } catch (error) {
-        console.error("Fehler beim Löschen der localStorage Daten:", error);
-      }
+      const { data: { user } } = await supabase.auth.getUser();
+      const anzahlAbweichungen = abgleichData?.abgleich?.filter((i: any) => i.status !== "ok").length || 0;
+      const anzahlPreisabweichungen = rechnungData?.preisabweichungen?.length || 0;
+      const rechnungsQuelle = rechnungData?.xrechnung ? (rechnungData.format || "ZUGFeRD") : "KI-Analyse";
 
-      // Redirect to dashboard
-      window.location.href = "/dashboard";
+      await supabase.from("audit_log").insert({
+        user_id: user?.id,
+        user_email: user?.email,
+        aktion: "freigabe",
+        entity_type: "lieferung",
+        entity_id: lieferungId,
+        details: {
+          ersparnis_eur: ersparnis,
+          notiz: notiz,
+          anzahl_abweichungen: anzahlAbweichungen,
+          anzahl_preisabweichungen: anzahlPreisabweichungen,
+          rechnung_quelle: rechnungsQuelle,
+          rechnungs_nummer: rechnungData?.rechnungs_nummer || null,
+          lieferant: rechnungData?.lieferant || null,
+          freigabe_zeitpunkt: new Date().toISOString(),
+        }
+      });
+
+      router.push("/dashboard");
     } catch (error) {
       console.error("Fehler beim Freigeben der Lieferung:", error);
       setError("Fehler beim Freigeben der Lieferung. Bitte versuchen Sie es erneut.");
@@ -276,7 +232,7 @@ export default function FreigabePage() {
           </div>
         </header>
 
-        <ProgressBar currentStep={5} />
+        <ProgressBar currentStep={5} lieferungId={lieferungId} lieferdatum={lieferdatum} />
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-12">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-accent-muted/50 px-3 py-1 text-xs font-medium text-accent ring-1 ring-accent/20">
@@ -874,7 +830,7 @@ export default function FreigabePage() {
 
           <div className="mt-8 flex justify-between">
             <a
-              href="/lieferung/rechnung"
+              href={lieferungId ? `/lieferung/rechnung?id=${lieferungId}${lieferdatum ? `&date=${lieferdatum}` : ""}` : "/lieferung/rechnung"}
               className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-surface-elevated"
             >
               <svg
@@ -927,5 +883,13 @@ export default function FreigabePage() {
         </main>
       </div>
     </AuthGuard>
+  );
+}
+
+export default function FreigabePage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" /></div>}>
+      <FreigabePageContent />
+    </Suspense>
   );
 }

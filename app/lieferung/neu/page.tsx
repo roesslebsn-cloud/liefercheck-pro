@@ -1,25 +1,22 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
 import { saveLieferung } from "../../../lib/database";
 
 export default function NeueLieferungPage() {
+  const router = useRouter();
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [showCalendar, setShowCalendar] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [lieferungId, setLieferungId] = useState<string | null>(null);
 
   useEffect(() => {
     const today = new Date().toISOString().split("T")[0];
     setSelectedDate(today);
-    localStorage.setItem("lieferdatum", today);
-
-    // Check if lieferungId already exists, if not create a new Lieferung
-    const existingLieferungId = localStorage.getItem("lieferungId");
-    if (!existingLieferungId) {
-      createNewLieferung();
-    }
+    createNewLieferung();
   }, []);
 
   const createNewLieferung = async () => {
@@ -29,7 +26,7 @@ export default function NeueLieferungPage() {
         lieferschein_data: undefined,
       });
       if (result && result.id) {
-        localStorage.setItem("lieferungId", result.id);
+        setLieferungId(result.id);
       }
     } catch (error) {
       console.error("Fehler beim Erstellen der Lieferung:", error);
@@ -38,8 +35,14 @@ export default function NeueLieferungPage() {
 
   const handleDateSelect = (date: string) => {
     setSelectedDate(date);
-    localStorage.setItem("lieferdatum", date);
     setShowCalendar(false);
+  };
+
+  const buildStepUrl = (step: string) => {
+    if (!lieferungId) return `/lieferung/${step}`;
+    const params = new URLSearchParams({ id: lieferungId });
+    if (selectedDate) params.set("date", selectedDate);
+    return `/lieferung/${step}?${params.toString()}`;
   };
 
   const isLieferTag = (date: Date) => {
@@ -117,7 +120,7 @@ export default function NeueLieferungPage() {
           </div>
         </header>
 
-        <ProgressBar currentStep={0} />
+        <ProgressBar currentStep={0} lieferungId={lieferungId} lieferdatum={selectedDate} />
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-12">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-accent-muted/50 px-3 py-1 text-xs font-medium text-accent ring-1 ring-accent/20">
@@ -344,17 +347,20 @@ export default function NeueLieferungPage() {
                   </svg>
                 ),
               },
-            ].map((item) => (
+            ].map((item) => {
+              const stepNames = ["pfand", "lieferschein", "abgleich", "rechnung", "freigabe"];
+              const stepUrl = buildStepUrl(stepNames[item.step - 1]);
+              return (
               <a
                 key={item.step}
-                href={`/lieferung/${["pfand", "lieferschein", "abgleich", "rechnung", "freigabe"][item.step - 1]}`}
+                href={stepUrl}
                 className={`group rounded-xl border p-6 transition-colors ${
-                  selectedDate
+                  selectedDate && lieferungId
                     ? "border-border bg-surface-elevated hover:border-accent/50"
                     : "border-border bg-surface-elevated/50 opacity-50 cursor-not-allowed"
                 }`}
                 onClick={(e) => {
-                  if (!selectedDate) e.preventDefault();
+                  if (!selectedDate || !lieferungId) e.preventDefault();
                 }}
               >
                 <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-accent-muted/50 text-accent group-hover:bg-accent group-hover:text-white transition-colors">
@@ -365,7 +371,8 @@ export default function NeueLieferungPage() {
                 </h3>
                 <p className="mt-2 text-sm text-muted">{item.description}</p>
               </a>
-            ))}
+              );
+            })}
           </div>
         </main>
       </div>

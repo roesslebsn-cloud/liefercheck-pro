@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
-import { saveLieferung } from "../../../lib/database";
+import { saveLieferung, updateLieferung } from "../../../lib/database";
 
 interface PfandArtikel {
   id: string;
@@ -24,11 +25,21 @@ const vordefinierteArtikel: PfandArtikel[] = [
   { id: "biogon", name: "Biogon Flasche", menge: 0 },
 ];
 
-export default function PfandPage() {
+function PfandPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const lieferungId = searchParams.get("id");
+  const lieferdatum = searchParams.get("date");
   const [artikel, setArtikel] = useState<PfandArtikel[]>(vordefinierteArtikel);
-  const [lieferungId, setLieferungId] = useState<string | null>(null);
   const [neuerArtikelName, setNeuerArtikelName] = useState("");
   const [zeigeNeuerArtikel, setZeigeNeuerArtikel] = useState(false);
+
+  const buildNextUrl = (path: string) => {
+    const params = new URLSearchParams();
+    if (lieferungId) params.set("id", lieferungId);
+    if (lieferdatum) params.set("date", lieferdatum);
+    return `${path}?${params.toString()}`;
+  };
 
   const handleArtikelHinzufuegen = () => {
     const name = neuerArtikelName.trim();
@@ -57,63 +68,32 @@ export default function PfandPage() {
 
   const handleWeiter = async () => {
     const artikelMitMenge = artikel.filter((a) => a.menge > 0);
-
-    if (artikelMitMenge.length > 0) {
-      const lieferung = await saveLieferung({
-        pfand_items: {
-          artikel: artikelMitMenge.map((a) => ({
-            name: a.name,
-            marke: "",
-            groesse: "",
-            menge: a.menge,
-            typ: "Kiste",
-            stueck_pro_kiste: null,
-            unsicher: false,
-            hinweis: null,
-          })),
-          gesamt_kisten: artikelMitMenge.filter((a) =>
-            a.name.includes("Kiste")
-          ).length,
-          gesamt_faesser: artikelMitMenge.filter((a) => a.name.includes("Fass")).length > 0,
-          mehrere_bereiche: false,
-          analyse_hinweis: "Manuelle Eingabe",
-        },
-      });
-      setLieferungId(lieferung.id);
-      localStorage.setItem("lieferungId", lieferung.id);
-      localStorage.setItem(
-        "pfandItems",
-        JSON.stringify({
-          artikel: artikelMitMenge.map((a) => ({
-            name: a.name,
-            marke: "",
-            groesse: "",
-            menge: a.menge,
-            typ: "Kiste",
-            stueck_pro_kiste: null,
-            unsicher: false,
-            hinweis: null,
-          })),
-          gesamt_kisten: artikelMitMenge.filter((a) =>
-            a.name.includes("Kiste")
-          ).length,
-          gesamt_faesser: artikelMitMenge.filter((a) => a.name.includes("Fass")).length > 0,
-          mehrere_bereiche: false,
-          analyse_hinweis: "Manuelle Eingabe",
-        })
-      );
-    } else {
-      // Keine Artikel mit Menge > 0, trotzdem ID setzen
-      const lieferung = await saveLieferung({});
-      setLieferungId(lieferung.id);
-      localStorage.setItem("lieferungId", lieferung.id);
+    try {
+      if (artikelMitMenge.length > 0 && lieferungId) {
+        await updateLieferung(lieferungId, {
+          pfand_items: {
+            artikel: artikelMitMenge.map((a) => ({
+              name: a.name, marke: "", groesse: "", menge: a.menge,
+              typ: "Kiste", stueck_pro_kiste: null, unsicher: false, hinweis: null,
+            })),
+            gesamt_kisten: artikelMitMenge.filter((a) => a.name.includes("Kiste")).length,
+            gesamt_faesser: artikelMitMenge.filter((a) => a.name.includes("Fass")).length > 0,
+            mehrere_bereiche: false, analyse_hinweis: "Manuelle Eingabe",
+          },
+        });
+      } else if (!lieferungId) {
+        const lieferung = await saveLieferung({});
+        router.push(buildNextUrl("/lieferung/lieferschein").replace("?", `?id=${lieferung.id}&`).replace(/id=[^&]+&id=/, "id="));
+        return;
+      }
+    } catch (error) {
+      console.error("Fehler beim Speichern:", error);
     }
+    router.push(buildNextUrl("/lieferung/lieferschein"));
   };
 
-  const handleUeberspringen = async () => {
-    const lieferung = await saveLieferung({});
-    setLieferungId(lieferung.id);
-    localStorage.setItem("lieferungId", lieferung.id);
+  const handleUeberspringen = () => {
+    router.push(buildNextUrl("/lieferung/lieferschein"));
   };
 
   return (
@@ -151,7 +131,7 @@ export default function PfandPage() {
           </div>
         </header>
 
-        <ProgressBar currentStep={1} />
+        <ProgressBar currentStep={1} lieferungId={lieferungId} lieferdatum={lieferdatum} />
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 sm:py-12">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-accent-muted/50 px-3 py-1 text-xs font-medium text-accent ring-1 ring-accent/20">
@@ -256,15 +236,13 @@ export default function PfandPage() {
           </div>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <a
-              href="/lieferung/lieferschein"
+            <button
               onClick={handleUeberspringen}
               className="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-surface px-6 py-4 text-sm font-semibold text-white transition-colors hover:bg-surface-elevated sm:px-8 sm:py-3"
             >
               Überspringen
-            </a>
-            <a
-              href="/lieferung/lieferschein"
+            </button>
+            <button
               onClick={handleWeiter}
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-6 py-4 text-sm font-semibold text-white transition-colors hover:bg-accent-hover sm:px-8 sm:py-3"
             >
@@ -282,10 +260,18 @@ export default function PfandPage() {
                   d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"
                 />
               </svg>
-            </a>
+            </button>
           </div>
         </main>
       </div>
     </AuthGuard>
+  );
+}
+
+export default function PfandPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" /></div>}>
+      <PfandPageContent />
+    </Suspense>
   );
 }

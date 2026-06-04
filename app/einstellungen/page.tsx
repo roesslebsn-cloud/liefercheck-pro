@@ -1,7 +1,9 @@
 "use client";
+import { usePushNotifications } from "../../lib/usePushNotifications";
 
 import { useState, useEffect } from "react";
 import AuthGuard from "../components/AuthGuard";
+import AppHeader from "../components/AppHeader";
 import { supabase } from "../../lib/supabase";
 import { getEingehendeRechnungen, updateEingehendeRechnung, getUserSettings, updateUserSettings } from "../../lib/database";
 
@@ -11,6 +13,7 @@ export default function EinstellungenPage() {
   const [eingehendeRechnungen, setEingehendeRechnungen] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [wochenBerichtAktiv, setWochenBerichtAktiv] = useState(true);
+  const { supported: pushSupported, subscribed: pushSubscribed, loading: pushLoading, subscribe: pushSubscribe, unsubscribe: pushUnsubscribe } = usePushNotifications();
 
   useEffect(() => {
     loadUserData();
@@ -124,54 +127,22 @@ export default function EinstellungenPage() {
 
   return (
     <AuthGuard>
-      <div className="flex min-h-full flex-col">
-        <header className="border-b border-border bg-surface-elevated">
-          <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent-muted ring-1 ring-accent/30">
-                <svg
-                  className="h-5 w-5 text-accent"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                  stroke="currentColor"
-                  aria-hidden
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M10.343 3.94c.09-.542.56-.94 1.11-.94h1.093c.55 0 1.02.398 1.11.94l.149.894c.07.424.384.764.78.93.398.164.855.142 1.205-.108l.737-.527a1.125 1.125 0 0 1 1.45.12l.773.774c.39.389.44 1.002.12 1.45l-.527.737c-.25.35-.272.806-.107 1.204.165.397.505.71.93.78l.893.15c.543.09.94.56.94 1.109v1.094c0 .55-.397 1.02-.94 1.11l-.894.149c-.425.07-.765.383-.93.78-.165.398-.143.854.107 1.204l.527.738c.32.447.269 1.06-.12 1.45l-.774.773a1.125 1.125 0 0 1-1.449.12l-.738-.527c-.35-.25-.806-.272-1.203-.107-.397.165-.71.505-.781.929l-.15.894c-.09.542-.56.94-1.11.94h-1.094c-.55 0-1.019-.398-1.11-.94l-.148-.894c-.071-.424-.384-.764-.781-.93-.398-.164-.854-.142-1.204.108l-.738.527c-.447.32-1.06.269-1.45-.12l-.773-.774a1.125 1.125 0 0 1-.12-1.45l.527-.737c.25-.35.273-.806.108-1.204-.165-.397-.505-.71-.93-.78l-.894-.15c-.542-.09-.94-.56-.94-1.109v-1.094c0-.55.398-1.02.94-1.11l.894-.149c.424-.07.765-.383.78-.78.165-.398.143-.854-.107-1.204l-.527-.738a1.125 1.125 0 0 1 .12-1.45l.773-.773a1.125 1.125 0 0 1 1.45-.12l.737.527c.35.25.807.272 1.204.107.397-.165.71-.505.78-.929l.15-.894Z"
-                  />
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
-                  />
-                </svg>
-              </div>
-              <span className="text-sm font-semibold text-white">
-                LieferCheck Pro
-              </span>
-            </div>
-            <a
-              href="/dashboard"
-              className="text-sm text-muted transition-colors hover:text-white"
-            >
-              Zurück zum Dashboard
-            </a>
-          </div>
-        </header>
+      <div className="min-h-screen relative">
+        <div className="aurora-bg" />
+        <AppHeader />
 
-        <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-12">
-          <h1 className="text-3xl font-bold tracking-tight text-white">
-            Einstellungen
-          </h1>
-          <p className="mt-3 max-w-xl text-muted">
-            Verwalten Sie Ihre Einstellungen für LieferCheck Pro.
-          </p>
+        <main className="mx-auto w-full max-w-[1000px] px-5 sm:px-8 pt-10 pb-20 relative">
+          <div className="mb-10 reveal">
+            <h1 className="text-[32px] font-semibold tracking-tight gradient-text leading-none">
+              Einstellungen
+            </h1>
+            <p className="mt-2.5 max-w-xl text-[13.5px] text-muted">
+              Verwalten Sie Ihre Einstellungen für LieferCheck Pro.
+            </p>
+          </div>
 
           {/* Email Forwarding Setup */}
-          <div className="mt-10 rounded-xl border border-border bg-surface-elevated p-6">
+          <div className="mt-10 spotlight-card spotlight-border rounded-xl border border-border bg-surface-elevated p-6 reveal">
             <h2 className="text-lg font-semibold text-white">
               E-Mail-Weiterleitung einrichten
             </h2>
@@ -215,7 +186,7 @@ export default function EinstellungenPage() {
           </div>
 
           {/* Weekly Report Settings */}
-          <div className="mt-10 rounded-xl border border-border bg-surface-elevated p-6">
+          <div className="mt-10 spotlight-card spotlight-border rounded-xl border border-border bg-surface-elevated p-6 reveal">
             <h2 className="text-lg font-semibold text-white">
               Wöchentlicher Bericht
             </h2>
@@ -245,8 +216,31 @@ export default function EinstellungenPage() {
             </div>
           </div>
 
+          {/* Push-Benachrichtigungen */}
+          {pushSupported && (
+          <div className="mt-8 spotlight-card spotlight-border rounded-xl border border-border bg-surface-elevated p-6 reveal">
+            <h2 className="text-lg font-semibold text-white">Push-Benachrichtigungen</h2>
+            <p className="mt-2 text-sm text-muted">
+              Erhalten Sie Browser-Benachrichtigungen bei neuen Lieferungen und erkannten Abweichungen.
+            </p>
+            <div className="mt-6 flex items-center justify-between rounded-lg bg-surface p-4">
+              <div>
+                <p className="text-sm font-medium text-white">Benachrichtigungen aktivieren</p>
+                <p className="mt-1 text-xs text-muted">{pushSubscribed ? "Aktiv – Sie erhalten Benachrichtigungen" : "Deaktiviert"}</p>
+              </div>
+              <button
+                onClick={() => pushSubscribed ? pushUnsubscribe() : pushSubscribe()}
+                disabled={pushLoading}
+                className={"relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 " + (pushSubscribed ? "bg-accent" : "bg-surface-elevated")}
+              >
+                <span className={"inline-block h-4 w-4 transform rounded-full bg-white transition-transform " + (pushSubscribed ? "translate-x-6" : "translate-x-1")} />
+              </button>
+            </div>
+          </div>
+          )}
+
           {/* Eingehende Rechnungen */}
-          <div className="mt-10 rounded-xl border border-border bg-surface-elevated p-6">
+          <div className="mt-10 spotlight-card spotlight-border rounded-xl border border-border bg-surface-elevated p-6 reveal">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-white">
                 Eingehende Rechnungen

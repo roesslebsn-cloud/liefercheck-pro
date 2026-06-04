@@ -1,26 +1,39 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
 import { AbgleichAnalysis } from "../../../lib/types";
-import { updateLieferung } from "../../../lib/database";
+import { updateLieferung, getLieferungById } from "../../../lib/database";
 
-export default function AbgleichPage() {
+function AbgleichPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const lieferungId = searchParams.get("id");
+  const lieferdatum = searchParams.get("date");
+
+  const buildNextUrl = (path: string) => {
+    const params = new URLSearchParams();
+    if (lieferungId) params.set("id", lieferungId);
+    if (lieferdatum) params.set("date", lieferdatum);
+    return `${path}?${params.toString()}`;
+  };
   const [file, setFile] = useState<File | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [results, setResults] = useState<AbgleichAnalysis | null>(null);
-  const [lieferungId, setLieferungId] = useState<string | null>(null);
   const [lieferscheinData, setLieferscheinData] = useState<any>(null);
   const [fehler, setFehler] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
 
   useEffect(() => {
-    const id = localStorage.getItem("lieferungId");
-    if (id) setLieferungId(id);
-    const lieferschein = localStorage.getItem("lieferscheinData");
-    if (lieferschein) setLieferscheinData(JSON.parse(lieferschein));
-  }, []);
+    if (lieferungId) {
+      getLieferungById(lieferungId).then((lieferung) => {
+        if (lieferung?.lieferschein_data) setLieferscheinData(lieferung.lieferschein_data);
+        if (lieferung?.abgleich_data) setResults(lieferung.abgleich_data);
+      }).catch(console.error);
+    }
+  }, [lieferungId]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -124,7 +137,7 @@ export default function AbgleichPage() {
       const result: AbgleichAnalysis = await response.json();
       setResults(result);
 
-      localStorage.setItem("abgleichData", JSON.stringify(result));
+      // saved via updateLieferung
 
       if (lieferungId) {
         await updateLieferung(lieferungId, { abgleich_data: result });
@@ -172,7 +185,7 @@ export default function AbgleichPage() {
           </div>
         </header>
 
-        <ProgressBar currentStep={3} />
+        <ProgressBar currentStep={3} lieferungId={lieferungId} lieferdatum={lieferdatum} />
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-12">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-accent-muted/50 px-3 py-1 text-xs font-medium text-accent ring-1 ring-accent/20">
@@ -368,7 +381,7 @@ export default function AbgleichPage() {
 
           <div className="mt-8 flex justify-between">
             <a
-              href="/lieferung/lieferschein"
+              href={buildNextUrl("/lieferung/lieferschein")}
               className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-surface-elevated"
             >
               <svg
@@ -388,7 +401,7 @@ export default function AbgleichPage() {
             </a>
             {results && (
               <a
-                href="/lieferung/rechnung"
+                href={buildNextUrl("/lieferung/rechnung")}
                 className="inline-flex items-center gap-2 rounded-lg bg-accent px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent-hover"
               >
                 Weiter
@@ -411,5 +424,13 @@ export default function AbgleichPage() {
         </main>
       </div>
     </AuthGuard>
+  );
+}
+
+export default function AbgleichPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" /></div>}>
+      <AbgleichPageContent />
+    </Suspense>
   );
 }
