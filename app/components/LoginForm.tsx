@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 
 function getLoginErrorMessage(message: string): string {
@@ -15,6 +15,33 @@ export default function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPw, setShowPw] = useState(false);
+  const [autoCheck, setAutoCheck] = useState(true);
+
+  // Auth-Callback-Handler: Wenn User durch Magic-Link kommt
+  useEffect(() => {
+    (async () => {
+      try {
+        const hash = window.location.hash || "";
+        const isInviteOrRecovery = hash.includes("type=invite") || hash.includes("type=recovery") || hash.includes("type=signup");
+        const hasAccessToken = hash.includes("access_token");
+
+        // Wenn Token im Hash → Setup-Seite (mit Hash transportiert die Session weiter)
+        if (hasAccessToken) {
+          // Hash bleibt erhalten — supabase-js liest ihn aus
+          window.location.replace("/setup" + hash);
+          return;
+        }
+
+        // Wenn schon eingeloggt (z.B. Refresh) → Dashboard
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          window.location.replace("/dashboard");
+          return;
+        }
+      } catch {}
+      setAutoCheck(false);
+    })();
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -27,6 +54,17 @@ export default function LoginForm() {
       return;
     }
     window.location.href = "/dashboard";
+  }
+
+  if (autoCheck) {
+    return (
+      <div className="flex items-center justify-center py-6">
+        <svg className="h-5 w-5 animate-spin text-muted" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+        </svg>
+      </div>
+    );
   }
 
   return (
