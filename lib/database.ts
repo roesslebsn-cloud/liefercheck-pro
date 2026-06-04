@@ -398,3 +398,43 @@ export async function deleteStandort(id: string) {
     throw error;
   }
 }
+
+export async function getAllUsers(): Promise<any[]> {
+  try {
+    const { data, error } = await supabase
+      .from("user_settings")
+      .select("*")
+      .order("erstellt_am", { ascending: true });
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error("Fehler beim Laden der Nutzer:", error);
+    return [];
+  }
+}
+
+export async function updateUserRole(userId: string, role: "chef" | "mitarbeiter"): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from("user_settings")
+      .update({ rolle: role })
+      .eq("user_id", userId);
+    if (error) throw error;
+  } catch (error) {
+    console.error("Fehler beim Aktualisieren der Rolle:", error);
+    throw error;
+  }
+}
+
+export async function removeUserFromTeam(userId: string): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from("user_settings")
+      .delete()
+      .eq("user_id", userId);
+    if (error) throw error;
+  } catch (error) {
+    console.error("Fehler beim Entfernen des Nutzers:", error);
+    throw error;
+  }
+}
