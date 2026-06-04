@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import AuthGuard from "../components/AuthGuard";
 import AppHeader from "../components/AppHeader";
 import { supabase } from "../../lib/supabase";
-import { getEingehendeRechnungen, updateEingehendeRechnung, getUserSettings, updateUserSettings } from "../../lib/database";
+import { getEingehendeRechnungen, updateEingehendeRechnung, getUserSettings, updateUserSettings, updateMyVorname } from "../../lib/database";
 
 export default function EinstellungenPage() {
   const [userId, setUserId] = useState<string>("");
@@ -13,6 +13,8 @@ export default function EinstellungenPage() {
   const [eingehendeRechnungen, setEingehendeRechnungen] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [wochenBerichtAktiv, setWochenBerichtAktiv] = useState(true);
+  const [vorname, setVorname] = useState("");
+  const [vornameSaved, setVornameSaved] = useState(false);
   const { supported: pushSupported, subscribed: pushSubscribed, loading: pushLoading, subscribe: pushSubscribe, unsubscribe: pushUnsubscribe } = usePushNotifications();
 
   useEffect(() => {
@@ -26,6 +28,7 @@ export default function EinstellungenPage() {
       const settings = await getUserSettings();
       if (settings) {
         setWochenBerichtAktiv(settings.wochen_bericht_aktiv !== false);
+        setVorname(settings.vorname || "");
       }
     } catch (error) {
       console.error("Fehler beim Laden der Benutzereinstellungen:", error);
@@ -72,6 +75,16 @@ export default function EinstellungenPage() {
       window.location.href = "/lieferung/freigabe";
     } catch (error) {
       console.error("Fehler beim Starten der Prüfung:", error);
+    }
+  };
+
+  const handleVornameSave = async () => {
+    try {
+      await updateMyVorname(vorname.trim());
+      setVornameSaved(true);
+      setTimeout(() => setVornameSaved(false), 2000);
+    } catch (error) {
+      console.error("Fehler beim Speichern des Vornamens:", error);
     }
   };
 
@@ -139,6 +152,29 @@ export default function EinstellungenPage() {
             <p className="mt-2.5 max-w-xl text-[13.5px] text-muted">
               Verwalten Sie Ihre Einstellungen für LieferCheck Pro.
             </p>
+          </div>
+
+          {/* Profil */}
+          <div className="mt-10 spotlight-card spotlight-border rounded-xl border border-border bg-surface-elevated p-6 reveal">
+            <h2 className="text-lg font-semibold text-white">Profil</h2>
+            <p className="mt-2 text-sm text-muted">
+              Dein Vorname wird deinen Team-Kollegen angezeigt. Die E-Mail-Adresse bleibt verdeckt.
+            </p>
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+              <input
+                type="text"
+                value={vorname}
+                onChange={(e) => setVorname(e.target.value)}
+                placeholder="Dein Vorname"
+                className="input flex-1"
+              />
+              <button
+                onClick={handleVornameSave}
+                className="btn-primary"
+              >
+                {vornameSaved ? "Gespeichert ✓" : "Speichern"}
+              </button>
+            </div>
           </div>
 
           {/* Email Forwarding Setup */}

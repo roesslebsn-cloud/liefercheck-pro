@@ -3,16 +3,23 @@
 import { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import LogoutButton from "./LogoutButton";
-import { getUserRole } from "../../lib/database";
+import { getUserRole, markZuletztAktiv } from "../../lib/database";
+import { supabase } from "../../lib/supabase";
+import { isSuperAdminEmail } from "../../lib/admin";
 
 export default function AppHeader() {
   const router = useRouter();
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [userRole, setUserRole] = useState<"chef" | "mitarbeiter">("mitarbeiter");
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     getUserRole().then(setUserRole).catch(() => {});
+    markZuletztAktiv();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setIsAdmin(isSuperAdminEmail(user?.email));
+    });
   }, []);
 
   const navItems = [
@@ -20,7 +27,9 @@ export default function AppHeader() {
     { label: "Analyse", path: "/analytics" },
     { label: "Lieferanten", path: "/lieferanten" },
     { label: "Standorte", path: "/standorte" },
-    ...(userRole === "chef" ? [{ label: "Einstellungen", path: "/einstellungen" }] : []),
+    { label: "Team", path: "/team" },
+    { label: "Einstellungen", path: "/einstellungen" },
+    ...(isAdmin ? [{ label: "Admin", path: "/admin" }] : []),
   ];
 
   const isActive = (path: string) => pathname === path || pathname?.startsWith(path + "/");
