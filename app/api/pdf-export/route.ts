@@ -204,7 +204,7 @@ export async function POST(request: NextRequest) {
     });
 
     const pdfBytes = await pdfDoc.save();
-    return new NextResponse(pdfBytes, {
+    return new NextResponse(Buffer.from(pdfBytes), {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="lieferbericht-${(lieferung.id || "").slice(0, 8)}.pdf"`,
