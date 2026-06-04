@@ -37,9 +37,10 @@ export function usePushNotifications() {
     try {
       const reg = await navigator.serviceWorker.register("/sw.js");
       await navigator.serviceWorker.ready;
+      const vapidKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as BufferSource,
+        applicationServerKey: vapidKey as any,
       });
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return false;
