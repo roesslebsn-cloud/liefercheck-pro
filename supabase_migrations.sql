@@ -156,7 +156,130 @@ ALTER TABLE public.user_settings
   ADD COLUMN IF NOT EXISTS aktiver_standort_id UUID REFERENCES public.standorte(id) ON DELETE SET NULL;
 
 
+-- ──────────────────────────────────────────────────────────────────────────
+-- MIGRATION 5: Organisationen + Mandantentrennung + Team-System
+-- Was:
+--  * Jeder Chef = eine Organisation. Mitarbeiter erben organisation_id.
+--  * user_settings bekommt vorname, organisation_id, zuletzt_aktiv
+--  * Alle Datentabellen bekommen organisation_id + RLS-Policy "nur eigene Org"
+--  * team_einladungen Tabelle fuer Mitarbeiter-Einladungen mit Token
+-- ──────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS public.organisationen (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name          TEXT NOT NULL,
+  chef_user_id  UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  erstellt_am   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.organisationen ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE public.user_settings
+  ADD COLUMN IF NOT EXISTS vorname TEXT,
+  ADD COLUMN IF NOT EXISTS organisation_id UUID REFERENCES public.organisationen(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS zuletzt_aktiv TIMESTAMPTZ;
+
+ALTER TABLE public.lieferungen
+  ADD COLUMN IF NOT EXISTS organisation_id UUID REFERENCES public.organisationen(id) ON DELETE SET NULL;
+
+ALTER TABLE public.lieferanten
+  ADD COLUMN IF NOT EXISTS organisation_id UUID REFERENCES public.organisationen(id) ON DELETE SET NULL;
+
+ALTER TABLE public.standorte
+  ADD COLUMN IF NOT EXISTS organisation_id UUID REFERENCES public.organisationen(id) ON DELETE SET NULL;
+
+CREATE OR REPLACE FUNCTION public.get_my_organisation()
+RETURNS UUID LANGUAGE sql STABLE SECURITY DEFINER AS $$
+  SELECT organisation_id FROM public.user_settings WHERE user_id = auth.uid() LIMIT 1;
+$$;
+
+DROP POLICY IF EXISTS "Org sieht sich selbst" ON public.organisationen;
+CREATE POLICY "Org sieht sich selbst"
+  ON public.organisationen FOR SELECT
+  USING (id = public.get_my_organisation());
+
+DROP POLICY IF EXISTS "Chef bearbeitet eigene Org" ON public.organisationen;
+CREATE POLICY "Chef bearbeitet eigene Org"
+  ON public.organisationen FOR UPDATE
+  USING (id = public.get_my_organisation() AND is_chef());
+
+CREATE TABLE IF NOT EXISTS public.team_einladungen (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organisation_id UUID NOT NULL REFERENCES public.organisationen(id) ON DELETE CASCADE,
+  eingeladen_von  UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  email           TEXT NOT NULL,
+  vorname         TEXT,
+  rolle           TEXT NOT NULL DEFAULT 'mitarbeiter',
+  token           TEXT NOT NULL UNIQUE DEFAULT encode(gen_random_bytes(24), 'hex'),
+  angenommen_am   TIMESTAMPTZ,
+  erstellt_am     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  abgelaufen_am   TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '14 days')
+);
+
+ALTER TABLE public.team_einladungen ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Chef sieht eigene Einladungen" ON public.team_einladungen;
+CREATE POLICY "Chef sieht eigene Einladungen"
+  ON public.team_einladungen FOR SELECT
+  USING (organisation_id = public.get_my_organisation() AND is_chef());
+
+DROP POLICY IF EXISTS "Chef erstellt Einladungen" ON public.team_einladungen;
+CREATE POLICY "Chef erstellt Einladungen"
+  ON public.team_einladungen FOR INSERT
+  WITH CHECK (organisation_id = public.get_my_organisation() AND is_chef());
+
+DROP POLICY IF EXISTS "Chef loescht Einladungen" ON public.team_einladungen;
+CREATE POLICY "Chef loescht Einladungen"
+  ON public.team_einladungen FOR DELETE
+  USING (organisation_id = public.get_my_organisation() AND is_chef());
+
+CREATE INDEX IF NOT EXISTS idx_team_einladungen_token ON public.team_einladungen(token);
+CREATE INDEX IF NOT EXISTS idx_team_einladungen_email ON public.team_einladungen(email);
+
+-- Aktualisiere user_settings RLS: Mitarbeiter sehen alle der gleichen Org (fuer Team-Anzeige)
+DROP POLICY IF EXISTS "User sieht eigene Settings" ON public.user_settings;
+DROP POLICY IF EXISTS "Org-Mitglieder sehen sich gegenseitig" ON public.user_settings;
+CREATE POLICY "Org-Mitglieder sehen sich gegenseitig"
+  ON public.user_settings FOR SELECT
+  USING (user_id = auth.uid() OR organisation_id = public.get_my_organisation());
+
+DROP POLICY IF EXISTS "User aktualisiert eigene Settings" ON public.user_settings;
+CREATE POLICY "User aktualisiert eigene Settings"
+  ON public.user_settings FOR UPDATE
+  USING (user_id = auth.uid() OR (organisation_id = public.get_my_organisation() AND is_chef()));
+
+-- Aktualisiere RLS auf Lieferungen/Lieferanten/Standorte: organisation_id-basiert
+DROP POLICY IF EXISTS "User sieht eigene Lieferungen oder Chef alle" ON public.lieferungen;
+DROP POLICY IF EXISTS "Org sieht eigene Lieferungen" ON public.lieferungen;
+CREATE POLICY "Org sieht eigene Lieferungen"
+  ON public.lieferungen FOR SELECT
+  USING (
+    organisation_id = public.get_my_organisation()
+    OR (organisation_id IS NULL AND auth.uid() = user_id)
+  );
+
+DROP POLICY IF EXISTS "User sieht eigene Lieferanten" ON public.lieferanten;
+DROP POLICY IF EXISTS "Org sieht eigene Lieferanten" ON public.lieferanten;
+CREATE POLICY "Org sieht eigene Lieferanten"
+  ON public.lieferanten FOR SELECT
+  USING (
+    organisation_id = public.get_my_organisation()
+    OR (organisation_id IS NULL AND auth.uid() = user_id)
+  );
+
+DROP POLICY IF EXISTS "User sieht eigene Standorte oder Chef alle" ON public.standorte;
+DROP POLICY IF EXISTS "Org sieht eigene Standorte" ON public.standorte;
+CREATE POLICY "Org sieht eigene Standorte"
+  ON public.standorte FOR SELECT
+  USING (
+    organisation_id = public.get_my_organisation()
+    OR (organisation_id IS NULL AND auth.uid() = user_id)
+  );
+
+
 -- ═══════════════════════════════════════════════════════════════════════════
--- FERTIG. Pruefe in Supabase Table Editor ob 'audit_log', 'lieferanten',
--- 'standorte' existieren und ob 'lieferungen' die neuen Spalten hat.
+-- FERTIG. Pruefe in Supabase Table Editor:
+--   - 'organisationen', 'team_einladungen' existieren
+--   - 'user_settings' hat vorname, organisation_id, zuletzt_aktiv
+--   - 'lieferungen', 'lieferanten', 'standorte' haben organisation_id
 -- ═══════════════════════════════════════════════════════════════════════════

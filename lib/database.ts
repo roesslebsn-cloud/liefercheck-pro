@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { PfandItem, LieferscheinAnalysis, Lieferung, EingehendeRechnung, UserSettings, Lieferant, Standort } from "./types";
+import { PfandItem, LieferscheinAnalysis, Lieferung, EingehendeRechnung, UserSettings, Lieferant, Standort, Organisation, TeamEinladung, TeamMitglied } from "./types";
 
 // Helper function to normalize artikel names for matching
 export const normalizeArtikelKey = (name: string): string => {
@@ -417,7 +417,7 @@ export async function updateUserRole(userId: string, role: "chef" | "mitarbeiter
   try {
     const { error } = await supabase
       .from("user_settings")
-      .update({ rolle: role })
+      .update({ role })
       .eq("user_id", userId);
     if (error) throw error;
   } catch (error) {
@@ -437,4 +437,94 @@ export async function removeUserFromTeam(userId: string): Promise<void> {
     console.error("Fehler beim Entfernen des Nutzers:", error);
     throw error;
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ORGANISATIONEN + TEAM-SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function getMyOrganisation(): Promise<Organisation | null> {
+  try {
+    const settings = await getUserSettings();
+    if (!settings?.organisation_id) return null;
+    const { data, error } = await supabase
+      .from("organisationen")
+      .select("*")
+      .eq("id", settings.organisation_id)
+      .single();
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error("Fehler beim Laden der Organisation:", error);
+    return null;
+  }
+}
+
+export async function updateMyOrganisation(name: string): Promise<void> {
+  const org = await getMyOrganisation();
+  if (!org?.id) throw new Error("Keine Organisation gefunden");
+  const { error } = await supabase
+    .from("organisationen")
+    .update({ name })
+    .eq("id", org.id);
+  if (error) throw error;
+}
+
+export async function getTeamMitglieder(): Promise<TeamMitglied[]> {
+  try {
+    const { data, error } = await supabase
+      .from("user_settings")
+      .select("user_id, vorname, role, zuletzt_aktiv");
+    if (error) throw error;
+    return (data || []) as TeamMitglied[];
+  } catch (error) {
+    console.error("Fehler beim Laden des Teams:", error);
+    return [];
+  }
+}
+
+export async function updateMyVorname(vorname: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Nicht eingeloggt");
+  const { error } = await supabase
+    .from("user_settings")
+    .update({ vorname })
+    .eq("user_id", user.id);
+  if (error) throw error;
+}
+
+export async function markZuletztAktiv(): Promise<void> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase
+      .from("user_settings")
+      .update({ zuletzt_aktiv: new Date().toISOString() })
+      .eq("user_id", user.id);
+  } catch (e) {
+    // silent
+  }
+}
+
+export async function getOffeneEinladungen(): Promise<TeamEinladung[]> {
+  try {
+    const { data, error } = await supabase
+      .from("team_einladungen")
+      .select("*")
+      .is("angenommen_am", null)
+      .order("erstellt_am", { ascending: false });
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error("Fehler beim Laden der Einladungen:", error);
+    return [];
+  }
+}
+
+export async function deleteEinladung(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("team_einladungen")
+    .delete()
+    .eq("id", id);
+  if (error) throw error;
 }

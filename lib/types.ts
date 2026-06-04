@@ -87,6 +87,39 @@ export interface UserSettings {
   id?: string;
   user_id?: string;
   wochen_bericht_aktiv?: boolean;
+  role?: "chef" | "mitarbeiter";
+  vorname?: string;
+  organisation_id?: string;
+  zuletzt_aktiv?: string;
+  aktiver_standort_id?: string;
+}
+
+export interface Organisation {
+  id?: string;
+  name: string;
+  chef_user_id?: string;
+  erstellt_am?: string;
+}
+
+export interface TeamEinladung {
+  id?: string;
+  organisation_id: string;
+  eingeladen_von?: string;
+  email: string;
+  vorname?: string;
+  rolle: "chef" | "mitarbeiter";
+  token?: string;
+  angenommen_am?: string;
+  erstellt_am?: string;
+  abgelaufen_am?: string;
+}
+
+export interface TeamMitglied {
+  user_id: string;
+  vorname?: string;
+  role: "chef" | "mitarbeiter";
+  zuletzt_aktiv?: string;
+  email?: string;
 }
 
 export interface Lieferant {
