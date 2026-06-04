@@ -2,19 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import webpush from "web-push";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
-webpush.setVapidDetails(
-  "mailto:liefercheck@example.com",
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "",
-  process.env.VAPID_PRIVATE_KEY || ""
-);
-
 export async function POST(request: NextRequest) {
   try {
+    const vapidPublic = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    const vapidPrivate = process.env.VAPID_PRIVATE_KEY;
+
+    if (!vapidPublic || !vapidPrivate) {
+      return NextResponse.json({ error: "VAPID-Keys nicht konfiguriert" }, { status: 503 });
+    }
+
+    webpush.setVapidDetails("mailto:liefercheck@example.com", vapidPublic, vapidPrivate);
+
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+
     const { user_id, title, body, url } = await request.json();
 
     let query = supabase.from("push_subscriptions").select("subscription");
@@ -46,3 +49,5 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Push fehlgeschlagen" }, { status: 500 });
   }
 }
+
+export const dynamic = "force-dynamic";
