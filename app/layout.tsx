@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import SpotlightProvider from "./components/SpotlightProvider";
 import PasswortBanner from "./components/PasswortBanner";
+import DevClock from "./components/DevClock";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -55,6 +56,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <SpotlightProvider />
         <PasswortBanner />
+        <DevClock />
         {children}
       </body>
     </html>

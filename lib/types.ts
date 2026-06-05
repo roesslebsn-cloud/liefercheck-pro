@@ -21,11 +21,17 @@ export interface LieferscheinItem {
   artikel: string;
   menge: number;
   groesse: string;
+  artikelnummer?: string;
+  einheit?: string;
+  menge_gedruckt?: number;
+  korrigiert?: boolean;
+  unsicher?: boolean;
 }
 
 export interface NichtGeliefertItem {
   artikel: string;
   grund: string;
+  menge_gedruckt?: number;
 }
 
 export interface PfandEintrag {
@@ -99,6 +105,18 @@ export interface Organisation {
   name: string;
   chef_user_id?: string;
   erstellt_am?: string;
+  status?: "aktiv" | "gesperrt";
+  features?: Record<string, boolean>;
+  kontakt_email?: string;
+  notiz?: string;
+}
+
+export interface PlattformEinstellungen {
+  id?: number;
+  ankuendigung_text?: string | null;
+  ankuendigung_aktiv?: boolean;
+  ankuendigung_typ?: "info" | "warnung" | "wartung";
+  aktualisiert_am?: string;
 }
 
 export interface TeamEinladung {
@@ -122,6 +140,17 @@ export interface TeamMitglied {
   email?: string;
 }
 
+export interface AuditLogEintrag {
+  id: string;
+  erstellt_am: string;
+  user_id: string;
+  user_email?: string;
+  aktion: string;
+  entity_type: string;
+  entity_id?: string | null;
+  details?: Record<string, any>;
+}
+
 export interface Lieferant {
   id?: string;
   user_id?: string;
@@ -134,6 +163,17 @@ export interface Lieferant {
   preisliste?: Record<string, number>;
   aktiv?: boolean;
   erstellt_am?: string;
+}
+
+export interface PreisHistorieEintrag {
+  id?: string;
+  erstellt_am?: string;
+  lieferant_id: string;
+  artikel: string;
+  artikel_original?: string;
+  einzelpreis: number;
+  rechnung_datum?: string | null;
+  lieferung_id?: string | null;
 }
 
 export interface Standort {

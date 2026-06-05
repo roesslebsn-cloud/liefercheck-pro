@@ -4,8 +4,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
-import { updateLieferung, getLieferungById, getLieferanten } from "../../../lib/database";
-import { normalizeArtikelKey } from "../../../lib/database";
+import { updateLieferung, getLieferungById, getLieferanten, speicherPreisHistorie, findLieferantByName, berechnePreisabweichungen } from "../../../lib/database";
 import { Lieferant } from "../../../lib/types";
 
 function RechnungPageContent() {
@@ -248,41 +247,25 @@ function RechnungPageContent() {
   const applyPreisabgleichAndSave = async (data: any) => {
     setResults(data);
 
-    let abweichungen: any[] = [];
-    if (data.positionen && lieferanten.length > 0) {
-      const matchedLieferant = lieferanten.find(l =>
-        data.lieferant && l.name.toLowerCase().includes(data.lieferant.toLowerCase().split(" ")[0])
-      );
-      if (matchedLieferant?.preisliste && Object.keys(matchedLieferant.preisliste).length > 0) {
-        data.positionen.forEach((pos: any) => {
-          const posKey = normalizeArtikelKey(pos.artikel);
-          const preisEintrag = Object.entries(matchedLieferant.preisliste!).find(
-            ([artikel]) => normalizeArtikelKey(artikel) === posKey
-          );
-          if (preisEintrag && pos.einzelpreis) {
-            const rawPreis = preisEintrag[1] as any;
-            const listePreis = typeof rawPreis === "object" ? rawPreis.einzelpreis : rawPreis;
-            if (!listePreis) return;
-            const diff = Math.abs(pos.einzelpreis - listePreis);
-            const diffProzent = (diff / listePreis) * 100;
-            if (diffProzent > 1) {
-              abweichungen.push({
-                artikel: pos.artikel,
-                preis_rechnung: pos.einzelpreis,
-                preis_liste: listePreis,
-                abweichung_eur: +(pos.einzelpreis - listePreis).toFixed(2),
-                abweichung_prozent: +diffProzent.toFixed(1),
-              });
-            }
-          }
-        });
-      }
-    }
+    const abweichungen = berechnePreisabweichungen(data.positionen, lieferanten, data.lieferant);
     setPreisabweichungen(abweichungen);
 
     const rechnungDataMitAbweichungen = { ...data, preisabweichungen: abweichungen };
     if (lieferungId) {
       await updateLieferung(lieferungId, { rechnung_data: rechnungDataMitAbweichungen });
+    }
+
+    if (data.positionen?.length > 0 && data.lieferant) {
+      findLieferantByName(data.lieferant).then(lieferant => {
+        if (lieferant?.id) {
+          speicherPreisHistorie(
+            lieferant.id,
+            data.positionen,
+            data.datum || null,
+            lieferungId || undefined
+          ).catch(() => {});
+        }
+      }).catch(() => {});
     }
   };
 
@@ -314,9 +297,12 @@ function RechnungPageContent() {
             </div>
             <a
               href="/dashboard"
-              className="text-sm text-muted transition-colors hover:text-white"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-white transition-colors hover:border-accent/50"
             >
-              Abbrechen
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+              </svg>
+              Speichern &amp; schließen
             </a>
           </div>
         </header>

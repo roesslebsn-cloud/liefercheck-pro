@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { saveEingehendeRechnung } from "../../../lib/database";
+import { saveEingehendeRechnung, findLieferantByEmail, findLieferantByName, speicherPreisHistorie } from "../../../lib/database";
+import { parseERechnung, extractZUGFeRDFromPDF } from "../../../lib/erechnung";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { absender, betreff, anhang_base64, anhang_name } = body;
+    const { absender, betreff, anhang_base64, anhang_name, user_id } = body;
 
     if (!absender || !betreff || !anhang_base64 || !anhang_name) {
       return NextResponse.json(
@@ -14,34 +15,40 @@ export async function POST(request: NextRequest) {
     }
 
     let rechnungData: any = null;
+    const isXml = anhang_name.toLowerCase().endsWith(".xml");
+    const isPdf = anhang_name.toLowerCase().endsWith(".pdf");
 
-    // Check if PDF is ZUGFeRD (contains embedded XML)
-    const isZUGFeRD = anhang_base64.includes("ZUGFeRD") || 
-                      anhang_name.toLowerCase().includes("zugferd");
-
-    if (isZUGFeRD) {
-      // Extract embedded XML from ZUGFeRD PDF
+    if (isXml) {
+      // Direkt als XML parsen
       try {
-        // Simple regex to find XML content in PDF
-        const xmlMatch = anhang_base64.match(/<\?xml[\s\S]*?<\/invoice>/);
-        if (xmlMatch) {
-          const xmlContent = xmlMatch[0];
-          rechnungData = parseZUGFeRDXML(xmlContent);
-        } else {
-          // Fallback to KI analysis if XML extraction fails
-          rechnungData = await analyzeWithAI(anhang_base64);
+        const xmlString = Buffer.from(anhang_base64, "base64").toString("utf-8");
+        const parsed = parseERechnung(xmlString);
+        rechnungData = erechnungToRechnungData(parsed);
+      } catch (e) {
+        console.error("[RechnungEingang] XML-Parse-Fehler:", e);
+        rechnungData = await analyzeWithAI(anhang_base64);
+      }
+    } else if (isPdf) {
+      // Erst ZUGFeRD versuchen, dann KI-Fallback
+      try {
+        const xmlString = await extractZUGFeRDFromPDF(anhang_base64);
+        if (xmlString) {
+          const parsed = parseERechnung(xmlString);
+          rechnungData = erechnungToRechnungData(parsed);
         }
-      } catch (error) {
-        console.error("Fehler beim Parsen von ZUGFeRD:", error);
-        // Fallback to KI analysis
+      } catch {
+        // kein ZUGFeRD – ignorieren
+      }
+
+      if (!rechnungData) {
         rechnungData = await analyzeWithAI(anhang_base64);
       }
     } else {
-      // Regular PDF - use KI analysis
+      // Bild oder unbekannt – KI
       rechnungData = await analyzeWithAI(anhang_base64);
     }
 
-    // Save to database
+    // Speichern
     const result = await saveEingehendeRechnung({
       absender,
       betreff,
@@ -50,13 +57,32 @@ export async function POST(request: NextRequest) {
       rechnung_data: rechnungData,
     });
 
+    // Preishistorie automatisch befüllen (best-effort, benötigt Auth)
+    if (rechnungData?.positionen?.length > 0) {
+      try {
+        const lieferant =
+          (await findLieferantByEmail(absender)) ||
+          (rechnungData.lieferant ? await findLieferantByName(rechnungData.lieferant) : null);
+
+        if (lieferant?.id) {
+          await speicherPreisHistorie(
+            lieferant.id,
+            rechnungData.positionen,
+            rechnungData.datum || null
+          );
+        }
+      } catch {
+        // Auth-Problem im Webhook-Kontext – wird ignoriert
+      }
+    }
+
     return NextResponse.json({
       success: true,
       rechnung_data: rechnungData,
       id: result.id,
     });
   } catch (error) {
-    console.error("Fehler beim Verarbeiten der eingehenden Rechnung:", error);
+    console.error("[RechnungEingang] Fehler:", error);
     return NextResponse.json(
       { error: "Interner Serverfehler" },
       { status: 500 }
@@ -64,73 +90,39 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function parseZUGFeRDXML(xml: string): any {
-  // Simple XML parser for ZUGFeRD invoice data
-  // This is a basic implementation - in production you'd use a proper XML parser
-  const rechnungsnummerMatch = xml.match(/<ID>([^<]+)<\/ID>/);
-  const datumMatch = xml.match(/<IssueDate>([^<]+)<\/IssueDate>/);
-  const lieferantMatch = xml.match(/<SellerName>([^<]+)<\/SellerName>/);
-
-  const positionen: any[] = [];
-  const itemMatches = xml.matchAll(/<LineItem>[\s\S]*?<\/LineItem>/g);
-  
-  for (const match of itemMatches) {
-    const itemXml = match[0];
-    const artikelMatch = itemXml.match(/<Name>([^<]+)<\/Name>/);
-    const mengeMatch = itemXml.match(/<Quantity>([^<]+)<\/Quantity>/);
-    const preisMatch = itemXml.match(/<PriceAmount>([^<]+)<\/PriceAmount>/);
-
-    if (artikelMatch && mengeMatch) {
-      positionen.push({
-        artikel: artikelMatch[1],
-        menge: parseFloat(mengeMatch[1]),
-        einzelpreis: preisMatch ? parseFloat(preisMatch[1]) : null,
-      });
-    }
-  }
-
-  let netto = 0;
-  let brutto = 0;
-  let mwst = 0;
-
-  const nettoMatch = xml.match(/<TaxBasisTotalAmount>([^<]+)<\/TaxBasisTotalAmount>/);
-  const bruttoMatch = xml.match(/<GrandTotalAmount>([^<]+)<\/GrandTotalAmount>/);
-  const mwstMatch = xml.match(/<TaxTotalAmount>([^<]+)<\/TaxTotalAmount>/);
-
-  if (nettoMatch) netto = parseFloat(nettoMatch[1]);
-  if (bruttoMatch) brutto = parseFloat(bruttoMatch[1]);
-  if (mwstMatch) mwst = parseFloat(mwstMatch[1]);
-
+function erechnungToRechnungData(d: any): any {
   return {
-    rechnungs_nummer: rechnungsnummerMatch ? rechnungsnummerMatch[1] : "",
-    datum: datumMatch ? datumMatch[1] : "",
-    lieferant: lieferantMatch ? lieferantMatch[1] : "",
-    netto,
-    brutto,
-    mwst,
-    positionen,
+    rechnungs_nummer: d.rechnungsnummer || "",
+    datum: d.rechnungsdatum || "",
+    lieferant: d.lieferant?.name || "",
+    netto: d.summen?.nettoGesamt ?? null,
+    mwst: d.summen?.steuerBetrag ?? null,
+    brutto: d.summen?.bruttoGesamt ?? null,
+    positionen: (d.positionen || []).map((p: any) => ({
+      artikel: p.bezeichnung || p.artikel || "",
+      menge: p.menge ?? 1,
+      einzelpreis: p.einzelpreisNetto ?? null,
+      gesamtpreis: p.gesamtpreisNetto ?? null,
+    })),
+    xrechnung: true,
+    format: d.format || "XRechnung",
+    zahlungsziel: d.zahlungsziel ?? null,
+    faelligkeitsdatum: d.faelligkeitsdatum ?? null,
   };
 }
 
 async function analyzeWithAI(base64: string): Promise<any> {
   try {
-    const response = await fetch("/api/analyze", {
+    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+    const response = await fetch(`${baseUrl}/api/analyze`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: "rechnung",
-        images: [base64],
-      }),
+      body: JSON.stringify({ type: "rechnung", images: [base64] }),
     });
-
-    if (!response.ok) {
-      throw new Error("KI-Analyse fehlgeschlagen");
-    }
-
-    const result = await response.json();
-    return result;
+    if (!response.ok) throw new Error("KI-Analyse fehlgeschlagen");
+    return await response.json();
   } catch (error) {
-    console.error("Fehler bei der KI-Analyse:", error);
+    console.error("[RechnungEingang] KI-Analyse fehlgeschlagen:", error);
     return null;
   }
 }

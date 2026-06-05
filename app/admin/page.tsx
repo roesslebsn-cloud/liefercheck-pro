@@ -1,224 +1,176 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "../../lib/supabase";
-import { isSuperAdminEmail } from "../../lib/admin";
+import { adminFetch } from "../../lib/adminClient";
+import { SpotlightCard } from "../components/SpotlightCard";
+import { AnimatedNumber } from "../components/AnimatedNumber";
+import { TrendChart, TrendPoint } from "../components/TrendChart";
+import { AdminRequestsQueue } from "../components/AdminRequestsQueue";
 
-export default function AdminPage() {
+type Overview = {
+  kpis: {
+    kundenGesamt: number;
+    kundenAktiv30: number;
+    nutzerGesamt: number;
+    lieferungenGesamt: number;
+    lieferungenWoche: number;
+    gesamtErsparnis: number;
+    offeneAnfragen: number;
+  };
+  kundenVerlauf: TrendPoint[];
+  lieferungenVerlauf: TrendPoint[];
+  feed: { id: string; erstellt_am: string; user_email?: string; aktion: string; entity_type: string; details?: any }[];
+  achtung: { orgId: string; name: string; grund: string }[];
+};
+
+// audit_log-Aktionen lesbar machen
+const AKTION_LABEL: Record<string, string> = {
+  chef_angelegt: "Chef angelegt",
+  freigabe: "Lieferung freigegeben",
+  org_gesperrt: "Kunde gesperrt",
+  org_entsperrt: "Kunde entsperrt",
+  org_geloescht: "Kunde gelöscht",
+  org_aktualisiert: "Kunde bearbeitet",
+  passwort_zurueckgesetzt: "Passwort zurückgesetzt",
+  impersonation: "Als Kunde eingeloggt",
+  standort_angelegt: "Standort angelegt",
+  ankuendigung_aktualisiert: "Ankündigung geändert",
+};
+
+function aktionLabel(a: string) {
+  return AKTION_LABEL[a] || a.replace(/_/g, " ");
+}
+
+function grundFarbe(grund: string) {
+  if (grund === "gesperrt") return { bg: "var(--red-muted)", fg: "var(--red)" };
+  if (grund.includes("inaktiv")) return { bg: "rgba(245,158,11,0.12)", fg: "#f59e0b" };
+  return { bg: "var(--surface)", fg: "var(--text-muted)" };
+}
+
+export default function AdminUebersichtPage() {
   const router = useRouter();
-  const [authorized, setAuthorized] = useState<boolean | null>(null);
-  const [email, setEmail] = useState("");
-  const [vorname, setVorname] = useState("");
-  const [restaurant, setRestaurant] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPw, setShowPw] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [orgs, setOrgs] = useState<any[]>([]);
-  const [anfragen, setAnfragen] = useState<any[]>([]);
+  const [data, setData] = useState<Overview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        router.replace("/");
-        return;
-      }
-      const ok = isSuperAdminEmail(user.email);
-      setAuthorized(ok);
-      if (ok) loadAll();
-    })();
-  }, [router]);
-
-  const loadAll = async () => {
-    const [{ data: orgsData }, { data: anfragenData }] = await Promise.all([
-      supabase.from("organisationen").select("id, name, chef_user_id, erstellt_am").order("erstellt_am", { ascending: false }),
-      supabase.from("mitarbeiter_anfragen").select("*").eq("status", "pending").order("erstellt_am", { ascending: false }),
-    ]);
-    setOrgs(orgsData || []);
-    setAnfragen(anfragenData || []);
-  };
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setResult(null);
+  const load = async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      const res = await fetch("/api/admin/create-chef", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ email, vorname, restaurant, password }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Fehler");
-      setResult({ ok: true, msg: `Chef "${vorname}" für "${restaurant}" angelegt. Gib dem Chef seine Login-Daten: ${email} / ${password}` });
-      setEmail("");
-      setVorname("");
-      setRestaurant("");
-      setPassword("");
-      loadAll();
-    } catch (err: any) {
-      setResult({ ok: false, msg: err.message });
+      setData(await adminFetch<Overview>("/api/admin/overview"));
+    } catch (e: any) {
+      setErr(e.message);
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
   };
 
-  const handleEntscheidung = async (anfrageId: string, token: string, aktion: "approve" | "reject") => {
-    if (!confirm(`Anfrage wirklich ${aktion === "approve" ? "annehmen" : "ablehnen"}?`)) return;
-    try {
-      const res = await fetch(`/api/anfrage/entscheiden?token=${token}&aktion=${aktion}`);
-      if (!res.ok && res.status !== 200) {
-        throw new Error("Fehler beim Bearbeiten");
-      }
-      loadAll();
-    } catch (err: any) {
-      alert(err.message);
-    }
-  };
+  useEffect(() => { load(); }, []);
 
-  if (authorized === null) {
-    return <div className="flex min-h-screen items-center justify-center text-muted">Wird geladen...</div>;
-  }
+  const k = data?.kpis;
 
-  if (!authorized) {
-    return (
-      <div className="flex min-h-screen items-center justify-center px-6">
-        <div className="max-w-md text-center">
-          <h1 className="text-2xl font-semibold text-white">Zugriff verweigert</h1>
-          <p className="mt-3 text-muted">Diese Seite ist nur für Super-Admins.</p>
-          <a href="/dashboard" className="mt-6 inline-block text-accent hover:underline">Zurück zum Dashboard</a>
-        </div>
-      </div>
-    );
-  }
+  const kpiCards = [
+    { label: "Kunden gesamt", value: k?.kundenGesamt ?? 0, sub: `${k?.kundenAktiv30 ?? 0} aktiv (30 T)` },
+    { label: "Nutzer gesamt", value: k?.nutzerGesamt ?? 0, sub: "über alle Betriebe" },
+    { label: "Lieferungen geprüft", value: k?.lieferungenGesamt ?? 0, sub: `${k?.lieferungenWoche ?? 0} diese Woche` },
+    { label: "Ersparnis (Plattform)", value: k?.gesamtErsparnis ?? 0, prefix: "€", decimals: 2, sub: "über alle Kunden" },
+  ];
 
   return (
-    <div className="min-h-screen">
-      <header className="border-b border-border bg-surface-elevated">
-        <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
-          <div className="flex items-center gap-3">
-            <span className="rounded-full bg-red-500/20 px-3 py-1 text-xs font-medium text-red-400">Super-Admin</span>
-            <span className="text-sm font-semibold text-white">LieferCheck Pro</span>
-          </div>
-          <a href="/dashboard" className="text-sm text-muted hover:text-white">Dashboard</a>
+    <>
+      <div className="mb-8 reveal">
+        <h1 className="text-[26px] sm:text-[30px] font-semibold tracking-tight text-white">Übersicht</h1>
+        <p className="mt-1.5 text-[13.5px] text-muted">Dein Plattform-Cockpit – Kunden, Aktivität und Wachstum auf einen Blick.</p>
+      </div>
+
+      {err && (
+        <div className="mb-6 rounded-lg p-4 text-sm" style={{ background: "var(--red-muted)", color: "var(--red)" }}>
+          {err}
         </div>
-      </header>
+      )}
 
-      <main className="mx-auto max-w-5xl px-6 py-12 space-y-12">
+      {/* Offene Mitarbeiter-Anfragen (zeigt sich nur, wenn welche offen sind) */}
+      <AdminRequestsQueue onChange={load} />
 
-        {/* Offene Anfragen */}
-        {anfragen.length > 0 && (
-          <section>
-            <h2 className="text-xl font-semibold text-white flex items-center gap-3">
-              Offene Mitarbeiter-Anfragen
-              <span className="rounded-full bg-orange-500/20 px-2.5 py-0.5 text-xs font-medium text-orange-400">{anfragen.length}</span>
-            </h2>
-            <div className="mt-4 space-y-3">
-              {anfragen.map((a) => (
-                <div key={a.id} className="rounded-xl border border-orange-500/30 bg-orange-500/5 p-5">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <p className="text-sm">
-                        <span className="text-muted">Chef</span> <span className="font-medium text-white">{a.angefragt_von_email}</span>{" "}
-                        <span className="text-muted">möchte einen {a.rolle === "chef" ? "Chef" : "Mitarbeiter"} anlegen:</span>
-                      </p>
-                      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                        <span className="text-muted">E-Mail:</span><span className="text-white font-medium">{a.email}</span>
-                        <span className="text-muted">Vorname:</span><span className="text-white">{a.vorname || "-"}</span>
-                        <span className="text-muted">Rolle:</span><span className="text-white">{a.rolle}</span>
-                        <span className="text-muted">Erstellt:</span><span className="text-white">{new Date(a.erstellt_am).toLocaleString("de-DE")}</span>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleEntscheidung(a.id, a.approval_token, "approve")}
-                        className="rounded-lg bg-green-500 px-4 py-2 text-sm font-semibold text-white hover:bg-green-600"
-                      >Annehmen</button>
-                      <button
-                        onClick={() => handleEntscheidung(a.id, a.approval_token, "reject")}
-                        className="rounded-lg bg-red-500 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600"
-                      >Ablehnen</button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
+      {/* KPI-Karten */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-6">
+        {kpiCards.map((s, i) => (
+          <SpotlightCard
+            key={s.label}
+            className="relative overflow-hidden rounded-xl p-4 reveal hover-lift"
+            style={{ background: "var(--surface-elevated)", border: "1px solid var(--border)", boxShadow: "var(--shadow-inset)", animationDelay: `${i * 0.07}s` }}
+          >
+            <p className="text-[10px] font-medium uppercase tracking-wider text-muted">{s.label}</p>
+            <p className="mt-1.5 text-[24px] font-semibold tracking-tight leading-none tabular-nums text-white">
+              <AnimatedNumber value={s.value} prefix={s.prefix || ""} decimals={s.decimals || 0} ready={!loading} />
+            </p>
+            <p className="mt-1.5 text-[11px] text-muted">{s.sub}</p>
+          </SpotlightCard>
+        ))}
+      </div>
 
-        {/* Neuen Chef anlegen */}
-        <section>
-          <h1 className="text-3xl font-bold text-white">Neuen Chef anlegen</h1>
-          <p className="mt-3 text-muted">Account wird direkt mit temporärem Passwort angelegt. Du teilst dem Chef Email + Passwort persönlich mit. Beim ersten Login muss er das Passwort selbst ändern.</p>
-
-          <form onSubmit={handleCreate} className="mt-8 max-w-xl space-y-4 rounded-xl border border-border bg-surface-elevated p-6">
-            <div>
-              <label className="block text-xs font-medium text-muted mb-1.5">Restaurant / Betriebsname</label>
-              <input required value={restaurant} onChange={(e) => setRestaurant(e.target.value)} placeholder="z.B. Trattoria Bella" className="input" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-muted mb-1.5">Vorname des Chefs</label>
-              <input value={vorname} onChange={(e) => setVorname(e.target.value)} placeholder="z.B. Marco" className="input" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-muted mb-1.5">E-Mail des Chefs</label>
-              <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="chef@restaurant.de" className="input" />
-            </div>
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-medium text-muted">Temporäres Passwort (min. 8 Zeichen)</label>
-                <button type="button" onClick={() => setShowPw(!showPw)} className="text-[11px] text-muted hover:text-white">
-                  {showPw ? "Verbergen" : "Anzeigen"}
-                </button>
-              </div>
-              <input required type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} placeholder="••••••••" className="input" />
-            </div>
-            <button type="submit" disabled={submitting} className="btn-primary w-full">
-              {submitting ? "Wird angelegt..." : "Chef anlegen"}
-            </button>
-            {result && (
-              <div className={`rounded-lg p-3 text-sm ${result.ok ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
-                {result.msg}
-              </div>
-            )}
-          </form>
-        </section>
-
-        {/* Bestehende Orgs */}
-        <section>
-          <h2 className="text-xl font-semibold text-white">Bestehende Organisationen ({orgs.length})</h2>
-          <div className="mt-4 overflow-hidden rounded-xl border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-surface-elevated">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium text-muted">Name</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted">Chef-ID</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted">Angelegt</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orgs.map((o) => (
-                  <tr key={o.id} className="border-t border-border">
-                    <td className="px-4 py-3 text-white">{o.name}</td>
-                    <td className="px-4 py-3 text-muted font-mono text-xs">{o.chef_user_id?.slice(0, 8) || "-"}</td>
-                    <td className="px-4 py-3 text-muted">{new Date(o.erstellt_am).toLocaleDateString("de-DE")}</td>
-                  </tr>
-                ))}
-                {orgs.length === 0 && (
-                  <tr><td colSpan={3} className="px-4 py-6 text-center text-muted">Noch keine Organisationen.</td></tr>
-                )}
-              </tbody>
-            </table>
+      {/* Wachstums-Charts */}
+      <div className="grid gap-3 lg:grid-cols-2 mb-6">
+        {[
+          { title: "Kundenwachstum", points: data?.kundenVerlauf || [], color: "var(--accent)", fmt: (n: number) => `${n} Kunden` },
+          { title: "Geprüfte Lieferungen", points: data?.lieferungenVerlauf || [], color: "var(--green)", fmt: (n: number) => `${n} Lieferungen` },
+        ].map((c) => (
+          <div key={c.title} className="rounded-xl p-4 sm:p-5 reveal" style={{ background: "var(--surface-elevated)", border: "1px solid var(--border)", boxShadow: "var(--shadow-inset)" }}>
+            <p className="text-[10.5px] font-medium uppercase tracking-wider text-muted mb-4">{c.title}</p>
+            {loading ? <div className="skeleton h-[120px] rounded-lg" /> : <TrendChart data={c.points} color={c.color} formatValue={c.fmt} emptyHint="Wächst, sobald mehr Daten da sind." />}
           </div>
-        </section>
-      </main>
-    </div>
+        ))}
+      </div>
+
+      {/* Aktivität + Aufmerksamkeit */}
+      <div className="grid gap-3 lg:grid-cols-3">
+        {/* Aktivitäts-Feed */}
+        <div className="lg:col-span-2 rounded-xl p-4 sm:p-5 reveal" style={{ background: "var(--surface-elevated)", border: "1px solid var(--border)", boxShadow: "var(--shadow-inset)" }}>
+          <p className="text-[10.5px] font-medium uppercase tracking-wider text-muted mb-4">Letzte Aktivität</p>
+          {loading ? (
+            <div className="space-y-2">{[1, 2, 3, 4].map((i) => <div key={i} className="skeleton h-10 rounded-lg" />)}</div>
+          ) : (data?.feed.length ?? 0) === 0 ? (
+            <p className="text-[12.5px] text-muted py-6 text-center">Noch keine Ereignisse.</p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {data!.feed.map((f) => (
+                <li key={f.id} className="flex items-center justify-between gap-3 py-2.5">
+                  <div className="min-w-0">
+                    <p className="text-[12.5px] font-medium text-white truncate">{aktionLabel(f.aktion)}</p>
+                    <p className="text-[11px] text-muted truncate">{f.user_email || "System"}</p>
+                  </div>
+                  <span className="shrink-0 text-[10.5px] text-muted tabular-nums">
+                    {new Date(f.erstellt_am).toLocaleDateString("de-DE", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {/* Aufmerksamkeit nötig */}
+        <div className="rounded-xl p-4 sm:p-5 reveal" style={{ background: "var(--surface-elevated)", border: "1px solid var(--border)", boxShadow: "var(--shadow-inset)" }}>
+          <p className="text-[10.5px] font-medium uppercase tracking-wider text-muted mb-4">Aufmerksamkeit nötig</p>
+          {loading ? (
+            <div className="space-y-2">{[1, 2, 3].map((i) => <div key={i} className="skeleton h-10 rounded-lg" />)}</div>
+          ) : (data?.achtung.length ?? 0) === 0 ? (
+            <p className="text-[12.5px] text-muted py-6 text-center">Alles im grünen Bereich. 🎉</p>
+          ) : (
+            <ul className="space-y-2">
+              {data!.achtung.map((a) => {
+                const c = grundFarbe(a.grund);
+                return (
+                  <li key={a.orgId}>
+                    <button onClick={() => router.push(`/admin/kunden/${a.orgId}`)} className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-surface">
+                      <span className="text-[12.5px] font-medium text-white truncate">{a.name}</span>
+                      <span className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium" style={{ background: c.bg, color: c.fg }}>{a.grund}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
+    </>
   );
 }

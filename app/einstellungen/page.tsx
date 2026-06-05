@@ -5,13 +5,17 @@ import { useState, useEffect } from "react";
 import AuthGuard from "../components/AuthGuard";
 import AppHeader from "../components/AppHeader";
 import { supabase } from "../../lib/supabase";
-import { getEingehendeRechnungen, updateEingehendeRechnung, getUserSettings, updateUserSettings, updateMyVorname } from "../../lib/database";
+import { getEingehendeRechnungen, updateEingehendeRechnung, getUserSettings, updateUserSettings, updateMyVorname, getAllLieferungen, updateLieferung, getLieferanten, berechnePreisabweichungen, findLieferantByName, speicherPreisHistorie } from "../../lib/database";
 
 export default function EinstellungenPage() {
   const [userId, setUserId] = useState<string>("");
   const [forwardingEmail, setForwardingEmail] = useState<string>("");
   const [eingehendeRechnungen, setEingehendeRechnungen] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [zuordnenRechnung, setZuordnenRechnung] = useState<any>(null);
+  const [offeneLieferungen, setOffeneLieferungen] = useState<any[]>([]);
+  const [selectedLieferungId, setSelectedLieferungId] = useState<string>("");
+  const [zuordnenLoading, setZuordnenLoading] = useState(false);
   const [wochenBerichtAktiv, setWochenBerichtAktiv] = useState(true);
   const [vorname, setVorname] = useState("");
   const [vornameSaved, setVornameSaved] = useState(false);
@@ -67,18 +71,54 @@ export default function EinstellungenPage() {
 
   const handlePruefen = async (rechnung: any) => {
     try {
-      // Update status to verarbeitet
-      await updateEingehendeRechnung(rechnung.id, { status: "verarbeitet" });
-
-      // Save rechnung data to localStorage for freigabe flow
-      if (rechnung.rechnung_data) {
-        localStorage.setItem("rechnungData", JSON.stringify(rechnung.rechnung_data));
-      }
-
-      // Redirect to freigabe page
-      window.location.href = "/lieferung/freigabe";
+      const alle = await getAllLieferungen();
+      const offen = alle.filter((l: any) => l.status !== "abgeschlossen");
+      setOffeneLieferungen(offen);
+      setSelectedLieferungId(offen[0]?.id || "__neu__");
+      setZuordnenRechnung(rechnung);
     } catch (error) {
-      console.error("Fehler beim Starten der Prüfung:", error);
+      console.error("Fehler beim Laden der Lieferungen:", error);
+    }
+  };
+
+  const handleZuordnen = async () => {
+    if (!zuordnenRechnung) return;
+    setZuordnenLoading(true);
+    try {
+      await updateEingehendeRechnung(zuordnenRechnung.id, { status: "verarbeitet" });
+
+      if (selectedLieferungId && selectedLieferungId !== "__neu__") {
+        if (zuordnenRechnung.rechnung_data) {
+          const data = zuordnenRechnung.rechnung_data;
+          // Preisabgleich gegen Lieferanten-Preisliste durchführen
+          let rechnungDataMitAbweichungen = data;
+          try {
+            const lieferanten = await getLieferanten();
+            const abweichungen = berechnePreisabweichungen(data.positionen, lieferanten, data.lieferant);
+            rechnungDataMitAbweichungen = { ...data, preisabweichungen: abweichungen };
+
+            // Preishistorie befüllen (best-effort)
+            if (data.positionen?.length > 0 && data.lieferant) {
+              findLieferantByName(data.lieferant).then(l => {
+                if (l?.id) speicherPreisHistorie(l.id, data.positionen, data.datum || null, selectedLieferungId).catch(() => {});
+              }).catch(() => {});
+            }
+          } catch {
+            // Preisabgleich optional – bei Fehler ohne Abweichungen speichern
+          }
+          await updateLieferung(selectedLieferungId, { rechnung_data: rechnungDataMitAbweichungen });
+        }
+        const lieferung = offeneLieferungen.find(l => l.id === selectedLieferungId);
+        const dateParam = lieferung?.erstellt_am ? `&date=${lieferung.erstellt_am.split("T")[0]}` : "";
+        window.location.href = `/lieferung/freigabe?id=${selectedLieferungId}${dateParam}`;
+      } else {
+        window.location.href = "/lieferung/neu";
+      }
+    } catch (error) {
+      console.error("Fehler beim Zuordnen:", error);
+    } finally {
+      setZuordnenLoading(false);
+      setZuordnenRechnung(null);
     }
   };
 
@@ -407,6 +447,78 @@ export default function EinstellungenPage() {
           </div>
         </main>
       </div>
+
+      {/* Zuordnungs-Modal */}
+      {zuordnenRechnung && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-border bg-surface-elevated shadow-xl">
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
+              <div>
+                <h2 className="text-lg font-semibold text-white">Rechnung zuordnen</h2>
+                <p className="text-xs text-muted mt-0.5">{zuordnenRechnung.betreff}</p>
+              </div>
+              <button onClick={() => setZuordnenRechnung(null)} className="text-muted hover:text-white transition-colors">
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="px-6 py-5 space-y-4">
+              {zuordnenRechnung.rechnung_data && (
+                <div className="rounded-lg bg-surface p-4 grid grid-cols-2 gap-2 text-sm">
+                  {zuordnenRechnung.rechnung_data.lieferant && (
+                    <div><p className="text-xs text-muted">Lieferant</p><p className="text-white">{zuordnenRechnung.rechnung_data.lieferant}</p></div>
+                  )}
+                  {zuordnenRechnung.rechnung_data.rechnungs_nummer && (
+                    <div><p className="text-xs text-muted">Rechnungsnr.</p><p className="text-white">{zuordnenRechnung.rechnung_data.rechnungs_nummer}</p></div>
+                  )}
+                  {zuordnenRechnung.rechnung_data.brutto && (
+                    <div><p className="text-xs text-muted">Brutto</p><p className="text-white">€{parseFloat(zuordnenRechnung.rechnung_data.brutto).toFixed(2)}</p></div>
+                  )}
+                  {zuordnenRechnung.rechnung_data.datum && (
+                    <div><p className="text-xs text-muted">Datum</p><p className="text-white">{zuordnenRechnung.rechnung_data.datum}</p></div>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-medium text-muted mb-2">Welcher Lieferung zuordnen?</label>
+                <select
+                  value={selectedLieferungId}
+                  onChange={(e) => setSelectedLieferungId(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-white focus:border-accent focus:outline-none"
+                >
+                  {offeneLieferungen.length === 0 && (
+                    <option value="__neu__">Neue Lieferung starten</option>
+                  )}
+                  {offeneLieferungen.map((l: any) => (
+                    <option key={l.id} value={l.id}>
+                      {new Date(l.erstellt_am || l.created_at).toLocaleDateString("de-DE")} – {l.rechnung_data?.lieferant || `#${l.id?.slice(0,8)}`}
+                    </option>
+                  ))}
+                  <option value="__neu__">Neue Lieferung starten</option>
+                </select>
+                <p className="mt-1.5 text-xs text-muted">
+                  {offeneLieferungen.length === 0
+                    ? "Keine offenen Lieferungen – es wird eine neue gestartet."
+                    : `${offeneLieferungen.length} offene Lieferung(en) gefunden.`}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-border px-6 py-4">
+              <button onClick={() => setZuordnenRechnung(null)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted hover:text-white transition-colors">
+                Abbrechen
+              </button>
+              <button onClick={handleZuordnen} disabled={zuordnenLoading}
+                className="inline-flex items-center gap-2 rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-white hover:bg-accent-hover disabled:opacity-50 transition-colors">
+                {zuordnenLoading ? "Zuordne..." : selectedLieferungId === "__neu__" ? "Neue Lieferung starten" : "Rechnung zuordnen & prüfen"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AuthGuard>
   );
 }

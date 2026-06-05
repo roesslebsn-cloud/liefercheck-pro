@@ -6,6 +6,9 @@ import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
 import { AbgleichAnalysis } from "../../../lib/types";
 import { updateLieferung, getLieferungById } from "../../../lib/database";
+import { optimizeImageFile, pdfToImages } from "../../../lib/imageUtils";
+
+const MAX_DATEIEN = 7;
 
 function AbgleichPageContent() {
   const router = useRouter();
@@ -19,7 +22,7 @@ function AbgleichPageContent() {
     if (lieferdatum) params.set("date", lieferdatum);
     return `${path}?${params.toString()}`;
   };
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [results, setResults] = useState<AbgleichAnalysis | null>(null);
   const [lieferscheinData, setLieferscheinData] = useState<any>(null);
@@ -35,12 +38,15 @@ function AbgleichPageContent() {
     }
   }, [lieferungId]);
 
+  const addFiles = (incoming: FileList) => {
+    const neu = Array.from(incoming);
+    setFiles((prev) => [...prev, ...neu].slice(0, MAX_DATEIEN));
+    setResults(null);
+    setFehler(null);
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
-      setResults(null);
-      setFehler(null);
-    }
+    if (e.target.files && e.target.files.length > 0) addFiles(e.target.files);
   };
 
   const handleDrag = (e: React.DragEvent) => {
@@ -57,16 +63,11 @@ function AbgleichPageContent() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      setFile(e.dataTransfer.files[0]);
-      setResults(null);
-      setFehler(null);
-    }
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files);
   };
 
-  const handleRemoveFile = () => {
-    setFile(null);
+  const handleRemoveFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
     setResults(null);
     setFehler(null);
   };
@@ -83,7 +84,7 @@ function AbgleichPageContent() {
   };
 
   const handleAnalyze = async () => {
-    if (!file) return;
+    if (files.length === 0) return;
     if (!lieferscheinData) {
       setFehler("Kein Lieferschein aus Schritt 2 gefunden. Bitte zuerst den Lieferschein analysieren.");
       return;
@@ -93,32 +94,45 @@ function AbgleichPageContent() {
     setFehler(null);
 
     try {
-      let bestellungData: any = null;
-      const fileName = file.name.toLowerCase();
+      const bestellungRows: any[] = [];
+      const images: string[] = [];
 
-      if (fileName.endsWith(".csv")) {
-        const text = await file.text();
-        bestellungData = parseCSV(text);
-      } else if (
-        fileName.endsWith(".png") ||
-        fileName.endsWith(".jpg") ||
-        fileName.endsWith(".jpeg")
-      ) {
-        const reader = new FileReader();
-        const base64 = await new Promise<string>((resolve) => {
-          reader.onload = () => resolve(reader.result as string);
-          reader.readAsDataURL(file);
-        });
+      // Mehrere Dateien einsammeln: CSV direkt parsen, Bilder/PDF für die KI sammeln
+      for (const f of files) {
+        const name = f.name.toLowerCase();
+        if (name.endsWith(".csv")) {
+          const text = await f.text();
+          bestellungRows.push(...parseCSV(text));
+        } else if (f.type === "application/pdf" || name.endsWith(".pdf")) {
+          images.push(...(await pdfToImages(f)));
+        } else if (f.type.startsWith("image/") || /\.(png|jpe?g|webp)$/.test(name)) {
+          images.push(await optimizeImageFile(f));
+        } else {
+          setFehler(`Nicht unterstützte Datei: ${f.name}. Erlaubt: CSV, PNG, JPG, PDF.`);
+          setAnalyzing(false);
+          return;
+        }
+      }
 
+      // Screenshots/PDF-Seiten der Gastronovi-Bestellung per KI in Artikel umwandeln
+      if (images.length > 0) {
         const bildResponse = await fetch("/api/analyze", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "lieferschein", images: [base64] }),
+          body: JSON.stringify({ type: "bestellung", images }),
         });
-        bestellungData = await bildResponse.json();
-      } else {
-        setFehler("Nur CSV oder Bild-Dateien (PNG, JPG) werden unterstützt.");
-        setAnalyzing(false);
+        const bildData = await bildResponse.json();
+        if (!bildResponse.ok || bildData?.error) {
+          setFehler(bildData?.error || "Die Bestellung auf dem Bild konnte nicht gelesen werden. Bitte schärferen Screenshot/PDF verwenden.");
+          return;
+        }
+        if (Array.isArray(bildData.positionen)) {
+          bestellungRows.push(...bildData.positionen);
+        }
+      }
+
+      if (bestellungRows.length === 0) {
+        setFehler("Aus den hochgeladenen Dateien konnte keine Bestellung gelesen werden. Bitte CSV-Export oder lesbare Screenshots verwenden.");
         return;
       }
 
@@ -127,18 +141,17 @@ function AbgleichPageContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: "abgleich",
-          data: {
-            bestellung: bestellungData,
-            lieferschein: lieferscheinData,
-          },
+          data: { bestellung: bestellungRows, lieferschein: lieferscheinData },
         }),
       });
 
-      const result: AbgleichAnalysis = await response.json();
+      const result = await response.json();
+      if (!response.ok || result?.error) {
+        setFehler(result?.error || "Abgleich fehlgeschlagen. Bitte erneut versuchen.");
+        return;
+      }
+
       setResults(result);
-
-      // saved via updateLieferung
-
       if (lieferungId) {
         await updateLieferung(lieferungId, { abgleich_data: result });
       }
@@ -178,9 +191,12 @@ function AbgleichPageContent() {
             </div>
             <a
               href="/dashboard"
-              className="text-sm text-muted transition-colors hover:text-white"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-white transition-colors hover:border-accent/50"
             >
-              Abbrechen
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+              </svg>
+              Speichern &amp; schließen
             </a>
           </div>
         </header>
@@ -197,9 +213,9 @@ function AbgleichPageContent() {
             Gastronovi Abgleich
           </h1>
           <p className="mt-3 max-w-xl text-muted">
-            Laden Sie die Gastronovi-Exportdatei oder einen Screenshot der
-            Bestellung hoch. Die KI gleicht diese automatisch mit dem
-            Lieferschein ab.
+            Laden Sie die Gastronovi-Exportdatei oder Screenshots der Bestellung
+            hoch – auch mehrere Seiten/Dateien (CSV, Bild oder PDF). Die KI
+            gleicht alles automatisch mit dem Lieferschein ab.
           </p>
 
           {!lieferscheinData && (
@@ -223,7 +239,8 @@ function AbgleichPageContent() {
               <input
                 type="file"
                 id="gastronovi-datei"
-                accept=".csv,.png,.jpg,.jpeg"
+                accept=".csv,.png,.jpg,.jpeg,.pdf"
+                multiple
                 onChange={handleFileChange}
                 className="hidden"
               />
@@ -244,35 +261,42 @@ function AbgleichPageContent() {
                   </svg>
                 </div>
                 <p className="mt-4 text-lg font-medium text-white">
-                  Datei auswählen
+                  Dateien auswählen
                 </p>
                 <p className="mt-2 text-sm text-muted">
-                  CSV, PNG oder JPG bis 10MB
+                  CSV, PNG, JPG oder PDF · mehrseitig möglich (bis {MAX_DATEIEN} Dateien)
                 </p>
               </label>
 
-              {file && (
-                <div className="mt-6">
-                  <div className="flex items-center justify-between rounded-lg bg-surface p-3">
-                    <p className="text-sm text-muted truncate">{file.name}</p>
-                    <button
-                      onClick={handleRemoveFile}
-                      className="flex h-6 w-6 items-center justify-center rounded-full text-muted transition-colors hover:bg-red-500/20 hover:text-red-400"
-                    >
-                      <svg
-                        className="h-3 w-3"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        strokeWidth={2}
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M6 18 18 6M6 6l12 12"
-                        />
-                      </svg>
-                    </button>
+              {files.length > 0 && (
+                <div className="mt-6 text-left">
+                  <p className="text-sm font-medium text-white">
+                    Ausgewählte Dateien ({files.length}/{MAX_DATEIEN}):
+                  </p>
+                  <div className="mt-3 space-y-2">
+                    {files.map((f, index) => (
+                      <div key={index} className="flex items-center justify-between rounded-lg bg-surface p-3">
+                        <p className="text-sm text-muted truncate">{f.name}</p>
+                        <button
+                          onClick={() => handleRemoveFile(index)}
+                          className="flex h-6 w-6 items-center justify-center rounded-full text-muted transition-colors hover:bg-red-500/20 hover:text-red-400"
+                        >
+                          <svg
+                            className="h-3 w-3"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            strokeWidth={2}
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M6 18 18 6M6 6l12 12"
+                            />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
                   </div>
                   <button
                     onClick={handleAnalyze}

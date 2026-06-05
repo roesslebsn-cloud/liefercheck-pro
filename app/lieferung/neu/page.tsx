@@ -4,7 +4,8 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
-import { saveLieferung } from "../../../lib/database";
+import { saveLieferung, updateLieferung, getLieferanten } from "../../../lib/database";
+import { Lieferant } from "../../../lib/types";
 
 export default function NeueLieferungPage() {
   const router = useRouter();
@@ -12,11 +13,15 @@ export default function NeueLieferungPage() {
   const [showCalendar, setShowCalendar] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [lieferungId, setLieferungId] = useState<string | null>(null);
+  const [lieferanten, setLieferanten] = useState<Lieferant[]>([]);
+  const [selectedLieferantId, setSelectedLieferantId] = useState<string>("");
 
   useEffect(() => {
-    const today = new Date().toISOString().split("T")[0];
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     setSelectedDate(today);
     createNewLieferung();
+    getLieferanten().then(setLieferanten).catch(console.error);
   }, []);
 
   const createNewLieferung = async () => {
@@ -30,6 +35,13 @@ export default function NeueLieferungPage() {
       }
     } catch (error) {
       console.error("Fehler beim Erstellen der Lieferung:", error);
+    }
+  };
+
+  const handleLieferantChange = async (lieferantId: string) => {
+    setSelectedLieferantId(lieferantId);
+    if (lieferungId) {
+      await updateLieferung(lieferungId, { lieferant_id: lieferantId || undefined });
     }
   };
 
@@ -56,7 +68,8 @@ export default function NeueLieferungPage() {
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
     const daysInMonth = lastDay.getDate();
-    const startDayOfWeek = firstDay.getDay();
+    // getDay() → 0=So … 6=Sa; Kalender startet Mo → (day+6)%7 gibt 0=Mo … 6=So
+    const startDayOfWeek = (firstDay.getDay() + 6) % 7;
 
     const days = [];
     for (let i = 0; i < startDayOfWeek; i++) {
@@ -69,12 +82,13 @@ export default function NeueLieferungPage() {
   };
 
   const formatDate = (date: Date) => {
-    return date.toISOString().split("T")[0];
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   };
 
   const formatDisplayDate = (dateString: string) => {
     if (!dateString) return "";
-    const date = new Date(dateString);
+    const [y, m, d] = dateString.split("-").map(Number);
+    const date = new Date(y, m - 1, d);
     return date.toLocaleDateString("de-DE", {
       weekday: "long",
       day: "2-digit",
@@ -135,7 +149,29 @@ export default function NeueLieferungPage() {
             Folgen Sie den 5 Schritten, um Ihre Lieferung vollständig zu prüfen.
           </p>
 
-          <div className="mt-8 rounded-xl border border-border bg-surface-elevated p-6">
+          {lieferanten.length > 0 && (
+            <div className="mt-8 rounded-xl border border-border bg-surface-elevated p-6">
+              <label className="block text-sm font-medium text-white mb-2">
+                Lieferant auswählen
+              </label>
+              <select
+                value={selectedLieferantId}
+                onChange={(e) => handleLieferantChange(e.target.value)}
+                disabled={!lieferungId}
+                className="w-full rounded-lg border border-border bg-surface px-4 py-3 text-white hover:border-accent/50 transition-colors focus:border-accent focus:outline-none disabled:opacity-50"
+              >
+                <option value="">Lieferant wählen (optional)...</option>
+                {lieferanten.filter(l => l.aktiv !== false).map((l) => (
+                  <option key={l.id} value={l.id!}>{l.name}</option>
+                ))}
+              </select>
+              <p className="mt-2 text-xs text-muted">
+                Lieferant jetzt wählen → automatischer Preisabgleich in Schritt 4
+              </p>
+            </div>
+          )}
+
+          <div className="mt-6 rounded-xl border border-border bg-surface-elevated p-6">
             <label className="block text-sm font-medium text-white mb-2">
               Lieferdatum wählen
             </label>

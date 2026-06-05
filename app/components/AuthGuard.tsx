@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { getMeineOrgStatus } from "@/lib/database";
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -16,6 +17,14 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
       if (!session) {
         router.replace("/");
+        return;
+      }
+
+      // Gesperrte Kunden aussperren (Org-Status vom Admin gesetzt)
+      const status = await getMeineOrgStatus();
+      if (status === "gesperrt") {
+        await supabase.auth.signOut();
+        router.replace("/?gesperrt=1");
         return;
       }
 

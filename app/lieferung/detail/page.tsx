@@ -4,7 +4,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
 import AppHeader from "../../components/AppHeader";
-import { getLieferungById, deleteLieferung, getUserRole, normalizeArtikelKey } from "../../../lib/database";
+import { getLieferungById, deleteLieferung, getUserRole, normalizeArtikelKey, getLieferanten, logAudit, getLetzterAuditEintrag } from "../../../lib/database";
 
 function LieferungDetailContent() {
   const router = useRouter();
@@ -19,16 +19,44 @@ function LieferungDetailContent() {
   const [openStep, setOpenStep] = useState<number | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [datevLoading, setDatevLoading] = useState(false);
+  const [showReklamation, setShowReklamation] = useState(false);
+  const [reklamationEmail, setReklamationEmail] = useState("");
+  const [reklamationZusatz, setReklamationZusatz] = useState("");
+  const [reklamationSending, setReklamationSending] = useState(false);
+  const [reklamationSent, setReklamationSent] = useState(false);
+  const [lieferantEmail, setLieferantEmail] = useState("");
+  const [reklamationGesendetAm, setReklamationGesendetAm] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) { loadLieferung(id); getUserRole().then(setUserRole); }
   }, [id]);
 
   const loadLieferung = async (lid: string) => {
-    try { setLieferung(await getLieferungById(lid)); }
+    try {
+      const data = await getLieferungById(lid);
+      setLieferung(data);
+      if (data?.lieferant_id) {
+        getLieferanten().then(list => {
+          const l = list.find(x => x.id === data.lieferant_id);
+          if (l?.email) setLieferantEmail(l.email);
+        }).catch(() => {});
+      }
+      // Prüfen ob bereits eine Reklamation gesendet wurde (Audit-Log)
+      getLetzterAuditEintrag(lid, "reklamation").then(eintrag => {
+        if (eintrag) setReklamationGesendetAm(eintrag.erstellt_am);
+      }).catch(() => {});
+    }
     catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
+
+  const blobToBase64 = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
 
   const handleDelete = async () => {
     if (!id) return;
@@ -58,6 +86,61 @@ function LieferungDetailContent() {
       alert("PDF-Export fehlgeschlagen");
     } finally {
       setPdfLoading(false);
+    }
+  };
+
+  const handleReklamation = async () => {
+    if (!reklamationEmail || !lieferung) return;
+    setReklamationSending(true);
+    try {
+      // PDF-Lieferbericht für Anhang generieren (best-effort)
+      let pdfBase64: string | null = null;
+      try {
+        const pdfRes = await fetch("/api/pdf-export", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lieferung }),
+        });
+        if (pdfRes.ok) {
+          const blob = await pdfRes.blob();
+          pdfBase64 = await blobToBase64(blob);
+        }
+      } catch {
+        // PDF optional – E-Mail wird auch ohne Anhang gesendet
+      }
+
+      const res = await fetch("/api/reklamation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lieferung,
+          empfaengerEmail: reklamationEmail,
+          zusatzText: reklamationZusatz,
+          pdfBase64,
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || "E-Mail-Versand fehlgeschlagen");
+      }
+
+      // GoBD: Reklamation ins Audit-Log
+      const anzahlMengen = lieferung.abgleich_data?.abgleich?.filter((a: any) => a.status !== "ok").length || 0;
+      const anzahlPreise = lieferung.rechnung_data?.preisabweichungen?.length || 0;
+      await logAudit("reklamation", "lieferung", lieferung.id, {
+        empfaenger: reklamationEmail,
+        anzahl_mengenabweichungen: anzahlMengen,
+        anzahl_preisabweichungen: anzahlPreise,
+        rechnungs_nummer: lieferung.rechnung_data?.rechnungs_nummer || null,
+        mit_pdf_anhang: !!pdfBase64,
+      });
+      setReklamationGesendetAm(new Date().toISOString());
+      setReklamationSent(true);
+      setTimeout(() => { setShowReklamation(false); setReklamationSent(false); }, 2000);
+    } catch (e: any) {
+      alert("E-Mail-Versand fehlgeschlagen: " + (e?.message || "Unbekannter Fehler"));
+    } finally {
+      setReklamationSending(false);
     }
   };
 
@@ -281,6 +364,26 @@ function LieferungDetailContent() {
                   {datevLoading ? "Exportiere…" : "DATEV"}
                 </button>
               )}
+              {lieferung?.status === "abgeschlossen" && (
+                (lieferung?.abgleich_data?.abgleich?.some((a: any) => a.status !== "ok") ||
+                 lieferung?.rechnung_data?.preisabweichungen?.length > 0) && (
+                  <button
+                    onClick={() => {
+                      setReklamationEmail(lieferantEmail || "");
+                      setShowReklamation(true);
+                    }}
+                    className={reklamationGesendetAm ? "rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[12.5px] font-medium text-emerald-400 hover:bg-emerald-500/20 transition-all inline-flex items-center gap-1.5" : "btn-secondary"}
+                    title={reklamationGesendetAm ? `Bereits reklamiert am ${fmt(reklamationGesendetAm)}` : "Reklamations-E-Mail senden"}
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      {reklamationGesendetAm
+                        ? <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                        : <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />}
+                    </svg>
+                    {reklamationGesendetAm ? "Reklamiert" : "Reklamation"}
+                  </button>
+                )
+              )}
               {isChef && (
                 <button onClick={() => setShowDelete(true)}
                   className="rounded-md border border-red-500/30 px-3 py-1.5 text-[12.5px] font-medium text-red-400 hover:bg-red-500/10 hover:border-red-500/50 transition-all">
@@ -384,6 +487,74 @@ function LieferungDetailContent() {
             ))}
           </div>
         </main>
+
+        {showReklamation && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+            <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#111116] p-6 shadow-2xl">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-semibold text-white">Reklamations-E-Mail senden</h3>
+                <button onClick={() => setShowReklamation(false)} className="text-white/30 hover:text-white transition-colors">
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {reklamationGesendetAm && (
+                <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-3 mb-4 text-xs text-emerald-400">
+                  Bereits reklamiert am {fmt(reklamationGesendetAm)}. Erneutes Senden möglich.
+                </div>
+              )}
+
+              <div className="rounded-lg bg-white/[0.03] border border-white/5 p-3 mb-4 text-xs text-white/40">
+                <p className="text-white/60 mb-1">Folgende Abweichungen werden gemeldet:</p>
+                {lieferung?.abgleich_data?.abgleich?.filter((a: any) => a.status !== "ok").length > 0 && (
+                  <p>• {lieferung.abgleich_data.abgleich.filter((a: any) => a.status !== "ok").length} Mengenabweichung(en)</p>
+                )}
+                {lieferung?.rechnung_data?.preisabweichungen?.length > 0 && (
+                  <p>• {lieferung.rechnung_data.preisabweichungen.length} Preisabweichung(en)</p>
+                )}
+                <p className="mt-1.5 text-white/30">Der PDF-Lieferbericht wird automatisch angehängt.</p>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-white/50 mb-1.5">Empfänger E-Mail *</label>
+                  <input
+                    type="email"
+                    value={reklamationEmail}
+                    onChange={(e) => setReklamationEmail(e.target.value)}
+                    placeholder="lieferant@beispiel.de"
+                    className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/20 focus:border-blue-500/50 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-white/50 mb-1.5">Zusatztext (optional)</label>
+                  <textarea
+                    value={reklamationZusatz}
+                    onChange={(e) => setReklamationZusatz(e.target.value)}
+                    placeholder="Bitte prüfen und bis Freitag zurückmelden..."
+                    rows={3}
+                    className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/20 focus:border-blue-500/50 focus:outline-none resize-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <button onClick={() => setShowReklamation(false)} className="flex-1 rounded-lg border border-white/10 bg-white/5 py-2.5 text-sm font-medium text-white hover:bg-white/10 transition-colors">
+                  Abbrechen
+                </button>
+                <button
+                  onClick={handleReklamation}
+                  disabled={reklamationSending || !reklamationEmail || reklamationSent}
+                  className="flex-1 rounded-lg bg-blue-500 py-2.5 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-50 transition-colors"
+                >
+                  {reklamationSent ? "Gesendet ✓" : reklamationSending ? "Sende..." : "E-Mail senden"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {showDelete && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">

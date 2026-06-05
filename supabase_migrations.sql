@@ -319,9 +319,80 @@ CREATE INDEX IF NOT EXISTS idx_mitarbeiter_anfragen_token ON public.mitarbeiter_
 CREATE INDEX IF NOT EXISTS idx_mitarbeiter_anfragen_status ON public.mitarbeiter_anfragen(status);
 
 
+-- ──────────────────────────────────────────────────────────────────────────
+-- MIGRATION 7: preis_historie
+-- Was: Automatische Preishistorie pro Lieferant – wird stumm aus Rechnungen befuellt
+-- ──────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS public.preis_historie (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  erstellt_am      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  lieferant_id     UUID NOT NULL REFERENCES public.lieferanten(id) ON DELETE CASCADE,
+  artikel          TEXT NOT NULL,
+  artikel_original TEXT,
+  einzelpreis      NUMERIC NOT NULL,
+  rechnung_datum   DATE,
+  lieferung_id     UUID REFERENCES public.lieferungen(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_preis_historie_lieferant ON public.preis_historie(lieferant_id);
+CREATE INDEX IF NOT EXISTS idx_preis_historie_artikel   ON public.preis_historie(lieferant_id, artikel);
+CREATE INDEX IF NOT EXISTS idx_preis_historie_datum     ON public.preis_historie(lieferant_id, erstellt_am DESC);
+
+ALTER TABLE public.preis_historie ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Eigene Preishistorie lesen" ON public.preis_historie;
+CREATE POLICY "Eigene Preishistorie lesen"
+  ON public.preis_historie FOR ALL
+  USING (
+    lieferant_id IN (
+      SELECT id FROM public.lieferanten
+      WHERE user_id = auth.uid()
+         OR organisation_id = public.get_my_organisation()
+    )
+  );
+
+
+-- ──────────────────────────────────────────────────────────────────────────
+-- MIGRATION 8: Admin-Cockpit (Kunden-Status, Feature-Flags, Plattform-Banner)
+-- Was:
+--  * organisationen bekommt status (aktiv/gesperrt), features (JSONB), kontakt_email, notiz
+--  * plattform_einstellungen: Single-Row-Tabelle fuer globalen Ankuendigungs-Banner
+-- Hinweis: Schreibzugriff auf beide ausschliesslich ueber Service-Role (Admin-API).
+-- ──────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE public.organisationen
+  ADD COLUMN IF NOT EXISTS status        TEXT NOT NULL DEFAULT 'aktiv',   -- 'aktiv' | 'gesperrt'
+  ADD COLUMN IF NOT EXISTS features      JSONB NOT NULL DEFAULT '{}'::jsonb,
+  ADD COLUMN IF NOT EXISTS kontakt_email TEXT,
+  ADD COLUMN IF NOT EXISTS notiz         TEXT;
+
+CREATE TABLE IF NOT EXISTS public.plattform_einstellungen (
+  id                 INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),  -- erzwingt Single-Row
+  ankuendigung_text  TEXT,
+  ankuendigung_aktiv BOOLEAN NOT NULL DEFAULT false,
+  ankuendigung_typ   TEXT NOT NULL DEFAULT 'info',              -- 'info' | 'warnung' | 'wartung'
+  aktualisiert_am    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.plattform_einstellungen ENABLE ROW LEVEL SECURITY;
+
+-- Lesen duerfen alle eingeloggten Nutzer (fuer den Banner im Dashboard).
+-- Schreiben passiert ausschliesslich per Service-Role (umgeht RLS) -> keine Write-Policy noetig.
+DROP POLICY IF EXISTS "Jeder liest Plattform-Einstellungen" ON public.plattform_einstellungen;
+CREATE POLICY "Jeder liest Plattform-Einstellungen"
+  ON public.plattform_einstellungen FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+INSERT INTO public.plattform_einstellungen (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- FERTIG. Pruefe in Supabase Table Editor:
 --   - 'organisationen', 'team_einladungen', 'mitarbeiter_anfragen' existieren
 --   - 'user_settings' hat vorname, organisation_id, zuletzt_aktiv, passwort_temporaer
 --   - 'lieferungen', 'lieferanten', 'standorte' haben organisation_id
+--   - 'preis_historie' existiert mit Indizes und RLS
+--   - 'organisationen' hat status, features, kontakt_email, notiz
+--   - 'plattform_einstellungen' existiert mit genau einer Zeile (id=1)
 -- ═══════════════════════════════════════════════════════════════════════════

@@ -1,5 +1,5 @@
-import { supabase } from "./supabase";
-import { PfandItem, LieferscheinAnalysis, Lieferung, EingehendeRechnung, UserSettings, Lieferant, Standort, Organisation, TeamEinladung, TeamMitglied } from "./types";
+﻿import { supabase } from "./supabase";
+import { PfandItem, LieferscheinAnalysis, Lieferung, EingehendeRechnung, UserSettings, Lieferant, Standort, Organisation, TeamEinladung, TeamMitglied, PreisHistorieEintrag, AuditLogEintrag, PlattformEinstellungen } from "./types";
 
 // Helper function to normalize artikel names for matching
 export const normalizeArtikelKey = (name: string): string => {
@@ -16,38 +16,36 @@ export const normalizeArtikelKey = (name: string): string => {
   return (base + " " + size).trim();
 };
 
-export const calculateErsparnis = (rechnungData: any, lieferscheinData: any, abgleichData?: any): number => {
+// ─────────────────────────────────────────────────────────────────────────────
+// ERSPARNIS = erkannte Überzahlung.
+// Definition (einheitlich in der ganzen App):
+//   Für jede Rechnungsposition: wenn die BERECHNETE Menge (Rechnung) größer ist
+//   als die TATSÄCHLICH GELIEFERTE Menge (Lieferschein), wäre die Differenz zu
+//   viel bezahlt worden. Genau dieses Geld spart der Betrieb durch die Prüfung.
+//     ersparnis = Σ  max(0, menge_rechnung − menge_geliefert) × einzelpreis
+//   Wird ein berechneter Artikel gar nicht geliefert, gilt menge_geliefert = 0.
+// Diese Funktion ist die EINZIGE Quelle der Wahrheit (Dashboard == Freigabe).
+// ─────────────────────────────────────────────────────────────────────────────
+export const calculateErsparnis = (rechnungData: any, lieferscheinData: any, _abgleichData?: any): number => {
+  if (!rechnungData?.positionen || !Array.isArray(rechnungData.positionen)) return 0;
+  const geliefert: any[] = lieferscheinData?.gelieferte_artikel || [];
+
   let ersparnis = 0;
+  rechnungData.positionen.forEach((pos: any) => {
+    const preis = Number(pos.einzelpreis);
+    const mengeRechnung = Number(pos.menge);
+    if (!preis || !mengeRechnung) return;
 
-  // Primär: Abgleich (Gastronovi-Bestellung vs. geliefert) mit Preisen aus der Rechnung
-  if (abgleichData?.abgleich && rechnungData?.positionen) {
-    abgleichData.abgleich.forEach((item: any) => {
-      if (item.abweichung < 0) {
-        const key = normalizeArtikelKey(item.artikel);
-        const rechnungsPos = rechnungData.positionen.find(
-          (p: any) => normalizeArtikelKey(p.artikel) === key
-        );
-        if (rechnungsPos?.einzelpreis) {
-          ersparnis += Math.abs(item.abweichung) * rechnungsPos.einzelpreis;
-        }
-      }
-    });
-  }
+    const key = normalizeArtikelKey(pos.artikel);
+    const lsPos = geliefert.find((l: any) => normalizeArtikelKey(l.artikel) === key);
+    const mengeGeliefert = lsPos ? Number(lsPos.menge) || 0 : 0;
 
-  // Fallback: Rechnung vs. Lieferschein (falls kein Abgleich vorhanden)
-  if (ersparnis === 0 && rechnungData?.positionen && lieferscheinData?.gelieferte_artikel) {
-    rechnungData.positionen.forEach((pos: any) => {
-      const rechnungKey = normalizeArtikelKey(pos.artikel);
-      const lieferscheinPos = lieferscheinData.gelieferte_artikel.find(
-        (l: any) => normalizeArtikelKey(l.artikel) === rechnungKey
-      );
-      if (lieferscheinPos && pos.menge > lieferscheinPos.menge && pos.einzelpreis) {
-        ersparnis += (pos.menge - lieferscheinPos.menge) * pos.einzelpreis;
-      }
-    });
-  }
+    if (mengeRechnung > mengeGeliefert) {
+      ersparnis += (mengeRechnung - mengeGeliefert) * preis;
+    }
+  });
 
-  return ersparnis;
+  return Math.round(ersparnis * 100) / 100;
 };
 
 export async function saveLieferung(data: Lieferung) {
@@ -159,10 +157,9 @@ export async function getEingehendeRechnungen() {
       .order("empfangen_am", { ascending: false });
 
     if (error) throw error;
-    return data;
-  } catch (error) {
-    console.error("Fehler beim Laden der eingehenden Rechnungen:", error);
-    throw error;
+    return data || [];
+  } catch {
+    return [];
   }
 }
 
@@ -243,11 +240,22 @@ export async function updateUserSettings(data: Partial<UserSettings>) {
 
 export async function deleteLieferung(id: string) {
   try {
-    const { error } = await supabase
-      .from("lieferungen")
-      .delete()
-      .eq("id", id);
-    if (error) throw error;
+    // Loeschen laeuft ueber eine Service-Role-Route (Chef-verifiziert),
+    // damit es unabhaengig von RLS-Policies zuverlaessig funktioniert.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error("Nicht eingeloggt");
+    const res = await fetch("/api/lieferung/delete", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ id }),
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.error || "Löschen fehlgeschlagen");
+    }
   } catch (error) {
     console.error("Fehler beim Löschen der Lieferung:", error);
     throw error;
@@ -276,6 +284,21 @@ export async function initUserSettingsIfNeeded() {
     }
   } catch (e) {
     console.error("initUserSettings error:", e);
+  }
+}
+
+// Stellt sicher, dass der eingeloggte Chef einer Organisation angehoert
+// (Selbstheilung gegen "Team (0)" bei Alt-Accounts).
+export async function ensureOrganisation(): Promise<void> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+    await fetch("/api/org/ensure", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+  } catch {
+    // still – darf den Dashboard-Load nie blockieren
   }
 }
 
@@ -401,10 +424,12 @@ export async function deleteStandort(id: string) {
 
 export async function getAllUsers(): Promise<any[]> {
   try {
-    const { data, error } = await supabase
-      .from("user_settings")
-      .select("*")
-      .order("erstellt_am", { ascending: true });
+    const settings = await getUserSettings();
+    let query = supabase.from("user_settings").select("*").order("erstellt_am", { ascending: true });
+    if (settings?.organisation_id) {
+      query = query.eq("organisation_id", settings.organisation_id);
+    }
+    const { data, error } = await query;
     if (error) throw error;
     return data || [];
   } catch (error) {
@@ -472,13 +497,31 @@ export async function updateMyOrganisation(name: string): Promise<void> {
 
 export async function getTeamMitglieder(): Promise<TeamMitglied[]> {
   try {
-    const { data, error } = await supabase
-      .from("user_settings")
-      .select("user_id, vorname, role, zuletzt_aktiv");
-    if (error) throw error;
-    return (data || []) as TeamMitglied[];
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return [];
+    const res = await fetch("/api/team/members", {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (!res.ok) return [];
+    return await res.json();
   } catch (error) {
     console.error("Fehler beim Laden des Teams:", error);
+    return [];
+  }
+}
+
+// Audit-Protokoll eines Mitarbeiters laden (nur Chef, via Service-Role-Route)
+export async function getAuditLogFuerUser(userId: string): Promise<AuditLogEintrag[]> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return [];
+    const res = await fetch(`/api/team/audit?userId=${encodeURIComponent(userId)}`, {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (!res.ok) return [];
+    return await res.json();
+  } catch (error) {
+    console.error("Fehler beim Laden des Audit-Logs:", error);
     return [];
   }
 }
@@ -527,4 +570,233 @@ export async function deleteEinladung(id: string): Promise<void> {
     .delete()
     .eq("id", id);
   if (error) throw error;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PREISHISTORIE – stumme automatische Befüllung aus Rechnungen
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function findLieferantByEmail(email: string): Promise<Lieferant | null> {
+  if (!email) return null;
+  try {
+    const { data } = await supabase
+      .from("lieferanten")
+      .select("*")
+      .ilike("email", email.trim().toLowerCase())
+      .limit(1);
+    return data?.[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function findLieferantByName(name: string): Promise<Lieferant | null> {
+  if (!name) return null;
+  try {
+    const { data } = await supabase
+      .from("lieferanten")
+      .select("*")
+      .order("name");
+    if (!data || data.length === 0) return null;
+    const normalizedInput = normalizeArtikelKey(name);
+    const match = data.find((l: any) => {
+      const normalizedName = normalizeArtikelKey(l.name);
+      return normalizedName.includes(normalizedInput.split(" ")[0]) ||
+             normalizedInput.includes(normalizedName.split(" ")[0]);
+    });
+    return match || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function speicherPreisHistorie(
+  lieferantId: string,
+  positionen: { artikel: string; einzelpreis: number | null }[],
+  rechnungDatum: string | null,
+  lieferungId?: string
+): Promise<void> {
+  try {
+    const valid = positionen.filter(p => p.einzelpreis != null && p.einzelpreis > 0);
+    if (valid.length === 0) return;
+
+    const rows = valid.map(p => ({
+      lieferant_id: lieferantId,
+      artikel: normalizeArtikelKey(p.artikel),
+      artikel_original: p.artikel,
+      einzelpreis: p.einzelpreis,
+      rechnung_datum: rechnungDatum || null,
+      lieferung_id: lieferungId || null,
+    }));
+
+    await supabase.from("preis_historie").insert(rows);
+
+    const neuePreise: Record<string, number> = {};
+    valid.forEach(p => { neuePreise[p.artikel] = p.einzelpreis!; });
+
+    const { data: lieferant } = await supabase
+      .from("lieferanten")
+      .select("preisliste")
+      .eq("id", lieferantId)
+      .single();
+
+    const merged = { ...(lieferant?.preisliste || {}), ...neuePreise };
+    await supabase.from("lieferanten").update({ preisliste: merged }).eq("id", lieferantId);
+  } catch (e) {
+    console.error("speicherPreisHistorie:", e);
+  }
+}
+
+export async function getPreisHistorie(lieferantId: string, artikel?: string): Promise<PreisHistorieEintrag[]> {
+  try {
+    let query = supabase
+      .from("preis_historie")
+      .select("*")
+      .eq("lieferant_id", lieferantId)
+      .order("erstellt_am", { ascending: false })
+      .limit(200);
+    if (artikel) {
+      query = (query as any).eq("artikel", normalizeArtikelKey(artikel));
+    }
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+  } catch (e) {
+    console.error("getPreisHistorie:", e);
+    return [];
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUDIT-LOG (GoBD) – zentrale Helfer
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function logAudit(
+  aktion: string,
+  entityType: string,
+  entityId: string,
+  details: Record<string, any> = {}
+): Promise<void> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from("audit_log").insert({
+      user_id: user?.id,
+      user_email: user?.email,
+      aktion,
+      entity_type: entityType,
+      entity_id: entityId,
+      details,
+    });
+  } catch (e) {
+    console.error("logAudit:", e);
+  }
+}
+
+export async function getLetzterAuditEintrag(entityId: string, aktion: string): Promise<any | null> {
+  try {
+    const { data } = await supabase
+      .from("audit_log")
+      .select("*")
+      .eq("entity_id", entityId)
+      .eq("aktion", aktion)
+      .order("erstellt_am", { ascending: false })
+      .limit(1);
+    return data?.[0] || null;
+  } catch (e) {
+    console.error("getLetzterAuditEintrag:", e);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PREISABWEICHUNGEN – Rechnungspreise gegen Lieferanten-Preisliste (>1%)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export function berechnePreisabweichungen(
+  positionen: any[],
+  lieferanten: Lieferant[],
+  lieferantName?: string
+): any[] {
+  if (!positionen || positionen.length === 0 || lieferanten.length === 0) return [];
+
+  const matched = lieferanten.find(l =>
+    lieferantName && l.name.toLowerCase().includes(lieferantName.toLowerCase().split(" ")[0])
+  );
+  if (!matched?.preisliste || Object.keys(matched.preisliste).length === 0) return [];
+
+  const abweichungen: any[] = [];
+  positionen.forEach((pos: any) => {
+    const posKey = normalizeArtikelKey(pos.artikel);
+    const eintrag = Object.entries(matched.preisliste!).find(
+      ([artikel]) => normalizeArtikelKey(artikel) === posKey
+    );
+    if (eintrag && pos.einzelpreis) {
+      const raw = eintrag[1] as any;
+      const listePreis = typeof raw === "object" ? raw.einzelpreis : raw;
+      if (!listePreis) return;
+      const diff = Math.abs(pos.einzelpreis - listePreis);
+      const diffProzent = (diff / listePreis) * 100;
+      if (diffProzent > 1) {
+        abweichungen.push({
+          artikel: pos.artikel,
+          preis_rechnung: pos.einzelpreis,
+          preis_liste: listePreis,
+          abweichung_eur: +(pos.einzelpreis - listePreis).toFixed(2),
+          abweichung_prozent: +diffProzent.toFixed(1),
+        });
+      }
+    }
+  });
+  return abweichungen;
+}
+
+// ─── Plattform-Banner & Sperr-Status (vom Admin gesteuert) ───────────────────
+
+// Aktive globale Ankündigung (oder null). Liest plattform_einstellungen (id=1).
+export async function getAktiveAnkuendigung(): Promise<PlattformEinstellungen | null> {
+  const { data, error } = await supabase
+    .from("plattform_einstellungen")
+    .select("ankuendigung_text, ankuendigung_aktiv, ankuendigung_typ")
+    .eq("id", 1)
+    .single();
+  if (error || !data || !data.ankuendigung_aktiv || !data.ankuendigung_text) return null;
+  return data as PlattformEinstellungen;
+}
+
+// Status der eigenen Organisation ("aktiv" | "gesperrt" | null wenn keine Org).
+// Genutzt vom AuthGuard, um gesperrte Kunden auszusperren.
+export async function getMeineOrgStatus(): Promise<"aktiv" | "gesperrt" | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data: settings } = await supabase
+    .from("user_settings")
+    .select("organisation_id")
+    .eq("user_id", user.id)
+    .single();
+  if (!settings?.organisation_id) return null;
+  const { data: org } = await supabase
+    .from("organisationen")
+    .select("status")
+    .eq("id", settings.organisation_id)
+    .single();
+  return (org?.status as "aktiv" | "gesperrt") || "aktiv";
+}
+
+// Feature-Flags der eigenen Organisation. Default: alles an ({}).
+// Ein Feature gilt als deaktiviert, wenn features[key] === false.
+export async function getMeineFeatures(): Promise<Record<string, boolean>> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return {};
+  const { data: settings } = await supabase
+    .from("user_settings")
+    .select("organisation_id")
+    .eq("user_id", user.id)
+    .single();
+  if (!settings?.organisation_id) return {};
+  const { data: org } = await supabase
+    .from("organisationen")
+    .select("features")
+    .eq("id", settings.organisation_id)
+    .single();
+  return (org?.features as Record<string, boolean>) || {};
 }
