@@ -33,14 +33,10 @@ export default function Impressum() {
         <h1 style={{ fontSize: 30, fontWeight: 800, margin: "28px 0 4px", letterSpacing: "-0.02em" }}>Impressum</h1>
         <p style={{ color: "#8b8f99", fontSize: 14, marginBottom: 32 }}>Angaben gemäß § 5 TMG</p>
 
-        <div style={{ background: "rgba(245,158,11,0.07)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 10, padding: "12px 16px", marginBottom: 36, fontSize: 13, color: "#f59e0b" }}>
-          ⚠ Platzhalter müssen vor Veröffentlichung durch echte Angaben ersetzt werden.
-        </div>
-
         <Section title="Verantwortlicher">
           <p>Silas Rößle</p>
-          <p><Placeholder>[STRASSE + HAUSNUMMER]</Placeholder></p>
-          <p><Placeholder>[PLZ ORT]</Placeholder></p>
+          <p>Forststraße 27/1</p>
+          <p>74376 Gemmrigheim</p>
         </Section>
 
         <Section title="Kontakt">
@@ -50,16 +46,12 @@ export default function Impressum() {
 
         <Section title="Steuernummer / USt-ID">
           <p style={{ color: "#8b8f99" }}>
-            Steuernummer: <Placeholder>[WIRD VOM FINANZAMT VERGEBEN]</Placeholder>
-          </p>
-          <p style={{ color: "#8b8f99", marginTop: 4 }}>
-            Die Steuernummer wird nach der Gewerbeanmeldung und dem Fragebogen zur steuerlichen Erfassung
-            vom zuständigen Finanzamt zugeteilt.
+            Steuernummer: wird nach Gewerbeanmeldung ergänzt.
           </p>
         </Section>
 
         <Section title="Verantwortlich für den Inhalt (§ 18 Abs. 2 MStV)">
-          <p>Silas Rößle, <Placeholder>[ADRESSE WIE OBEN]</Placeholder></p>
+          <p>Silas Rößle, Forststraße 27/1, 74376 Gemmrigheim</p>
         </Section>
 
         <Section title="Hinweis zur KI-gestützten Datenverarbeitung">
