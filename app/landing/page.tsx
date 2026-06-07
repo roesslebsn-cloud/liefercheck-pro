@@ -292,9 +292,9 @@ export default function LandingPage() {
         <div className="mx-auto max-w-6xl flex flex-col items-center gap-2 sm:flex-row sm:justify-between">
           <span>© {new Date().getFullYear()} LieferCheck Pro</span>
           <div className="flex gap-6">
-            <a href="#" className="hover:text-white/60 transition-colors">Datenschutz</a>
-            <a href="#" className="hover:text-white/60 transition-colors">Impressum</a>
-            <a href="#" className="hover:text-white/60 transition-colors">AGB</a>
+            <a href="/datenschutz" className="hover:text-white/60 transition-colors">Datenschutz</a>
+            <a href="/impressum" className="hover:text-white/60 transition-colors">Impressum</a>
+            <a href="/agb" className="hover:text-white/60 transition-colors">AGB</a>
           </div>
         </div>
       </footer>

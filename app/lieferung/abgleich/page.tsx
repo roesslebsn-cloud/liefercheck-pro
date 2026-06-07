@@ -4,7 +4,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
-import { AbgleichAnalysis } from "../../../lib/types";
+import { AbgleichAnalysis, PfandAnalysis, PfandEintrag } from "../../../lib/types";
 import { updateLieferung, getLieferungById } from "../../../lib/database";
 import { optimizeImageFile, pdfToImages } from "../../../lib/imageUtils";
 
@@ -26,6 +26,7 @@ function AbgleichPageContent() {
   const [analyzing, setAnalyzing] = useState(false);
   const [results, setResults] = useState<AbgleichAnalysis | null>(null);
   const [lieferscheinData, setLieferscheinData] = useState<any>(null);
+  const [pfandItems, setPfandItems] = useState<PfandAnalysis | null>(null);
   const [fehler, setFehler] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
 
@@ -34,6 +35,7 @@ function AbgleichPageContent() {
       getLieferungById(lieferungId).then((lieferung) => {
         if (lieferung?.lieferschein_data) setLieferscheinData(lieferung.lieferschein_data);
         if (lieferung?.abgleich_data) setResults(lieferung.abgleich_data);
+        if (lieferung?.pfand_items) setPfandItems(lieferung.pfand_items);
       }).catch(console.error);
     }
   }, [lieferungId]);
@@ -425,6 +427,79 @@ function AbgleichPageContent() {
               </div>
             </div>
           )}
+
+          {/* ─── Pfand-Abgleich ─────────────────────────────── */}
+          {(pfandItems?.artikel?.length || lieferscheinData?.pfand_eintrage?.length) ? (
+            <div className="mt-6 rounded-xl border border-border bg-surface-elevated p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: "rgba(245,158,11,0.15)", color: "#f59e0b" }}>
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.7} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m20.25 7.5-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z" />
+                  </svg>
+                </div>
+                <h3 className="text-[15px] font-semibold text-white">Pfand-Abgleich</h3>
+              </div>
+
+              {/* Spalten-Header */}
+              <div className="grid grid-cols-3 gap-2 mb-2 px-1">
+                <p className="text-[10.5px] uppercase tracking-wider font-medium text-muted">Artikel</p>
+                <p className="text-[10.5px] uppercase tracking-wider font-medium text-muted text-center">Schritt 1 (manuell)</p>
+                <p className="text-[10.5px] uppercase tracking-wider font-medium text-muted text-center">Lieferschein (KI)</p>
+              </div>
+
+              {/* Alle Pfand-Positionen zusammenführen */}
+              {(() => {
+                const schritt1 = pfandItems?.artikel || [];
+                const lieferschein: PfandEintrag[] = lieferscheinData?.pfand_eintrage || [];
+                // Alle Namen sammeln (union)
+                const alle = Array.from(new Set([
+                  ...schritt1.map(a => a.name),
+                  ...lieferschein.map(e => e.artikel),
+                ]));
+                if (alle.length === 0) return (
+                  <p className="text-[12.5px] text-muted">Kein Pfand erfasst oder auf dem Lieferschein erkannt.</p>
+                );
+                return (
+                  <div className="space-y-2">
+                    {alle.map((name) => {
+                      const s1 = schritt1.find(a => a.name.toLowerCase() === name.toLowerCase());
+                      const ls = lieferschein.find(e => e.artikel.toLowerCase() === name.toLowerCase());
+                      const m1 = s1?.menge ?? null;
+                      const mLs = ls?.menge ?? null;
+                      const ok = m1 !== null && mLs !== null && m1 === mLs;
+                      const abw = m1 !== null && mLs !== null && m1 !== mLs;
+                      const nurEins = (m1 !== null) !== (mLs !== null);
+                      return (
+                        <div key={name} className={`grid grid-cols-3 gap-2 items-center rounded-lg px-3 py-2.5 ${
+                          ok ? "bg-green-500/10" : abw ? "bg-yellow-500/10" : "bg-surface/60"
+                        }`}>
+                          <p className="text-[13px] font-medium text-white truncate">{name}</p>
+                          <p className="text-[13px] text-center tabular-nums" style={{ color: m1 !== null ? "var(--text-default)" : "var(--text-faint)" }}>
+                            {m1 !== null ? m1 : "—"}
+                          </p>
+                          <div className="flex items-center justify-center gap-1.5">
+                            <p className="text-[13px] tabular-nums" style={{ color: mLs !== null ? "var(--text-default)" : "var(--text-faint)" }}>
+                              {mLs !== null ? mLs : "—"}
+                            </p>
+                            {ok && <span className="text-[10px] font-semibold text-green-400">✓</span>}
+                            {abw && <span className="text-[10px] font-semibold text-yellow-400">≠</span>}
+                            {nurEins && <span className="text-[10px] font-semibold" style={{ color: "var(--text-faint)" }}>?</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* Legende */}
+              <div className="mt-3 flex flex-wrap gap-3 text-[10.5px] text-muted">
+                <span className="flex items-center gap-1"><span className="text-green-400 font-bold">✓</span> stimmt überein</span>
+                <span className="flex items-center gap-1"><span className="text-yellow-400 font-bold">≠</span> Abweichung</span>
+                <span className="flex items-center gap-1"><span style={{ color: "var(--text-faint)" }} className="font-bold">?</span> nur einseitig erfasst</span>
+              </div>
+            </div>
+          ) : null}
 
           <div className="mt-8 flex justify-between">
             <a

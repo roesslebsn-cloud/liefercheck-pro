@@ -1,10 +1,26 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 -- LieferCheck Pro - Supabase Migrations
 -- ═══════════════════════════════════════════════════════════════════════════
--- Anleitung: Jede Migration einzeln in Supabase SQL Editor ausfuehren.
+-- Anleitung: Komplette Datei auf einmal in Supabase SQL Editor ausfuehren.
 -- Jeder Block ist idempotent (mehrfach ausfuehrbar ohne Fehler).
--- Reihenfolge: 1 -> 2 -> 3 -> 4
+-- Reihenfolge: 0 -> 1 -> 2 -> ... -> 8 (in dieser Datei von oben nach unten)
 -- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ──────────────────────────────────────────────────────────────────────────
+-- MIGRATION 0: Hilfsfunktion is_chef()  (MUSS ZUERST laufen)
+-- Was: Gibt true zurueck, wenn der eingeloggte Nutzer die Rolle 'chef' hat.
+--      Wird von fast allen RLS-Policies weiter unten benoetigt.
+-- CREATE OR REPLACE -> ueberschreibt gefahrlos eine evtl. schon vorhandene Version.
+-- ──────────────────────────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.is_chef()
+RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.user_settings
+    WHERE user_id = auth.uid() AND role = 'chef'
+  );
+$$;
 
 
 -- ──────────────────────────────────────────────────────────────────────────

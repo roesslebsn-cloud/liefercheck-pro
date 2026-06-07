@@ -123,8 +123,84 @@ function SavingsTrend({ lieferungen, ready }: { lieferungen: any[]; ready: boole
   );
 }
 
+// ─── Produktiver Zeitvergleich: was hätte man stattdessen erledigen können ─
+const ZEIT_POOLS: [number, string[]][] = [
+  [0,   []],
+  [15,  [
+    "eine Schicht in der App einplanen",
+    "alle offenen Nachrichten beantworten",
+    "die Tagesabrechnung kontrollieren",
+    "einen Mitarbeiter kurz einweisen",
+    "die nächste Bestellung vorbereiten",
+    "Kühlraumtemperaturen prüfen",
+  ]],
+  [30,  [
+    "die Wochentagesplanung fertig stellen",
+    "eine Lieferantenrechnung überprüfen",
+    "den Lagerbestand aufnehmen",
+    "alle Tische neu eindecken",
+    "das Personal für morgen einteilen",
+    "Hygiene-Checkliste abhaken",
+  ]],
+  [50,  [
+    "die komplette Tages-Kassenabrechnung machen",
+    "Inventur eines ganzen Lagerregals",
+    "Speisekarte für nächste Woche anpassen",
+    "neues Rezept ausprobieren und testen",
+    "ein Mitarbeitergespräch führen",
+    "Bestellungen für drei Lieferanten vorbereiten",
+  ]],
+  [70,  [
+    "die komplette Wochenabrechnung erstellen",
+    "alle offenen Lieferantenrechnungen sortieren",
+    "Monatsdienstplan für das Team entwerfen",
+    "Bankgeschäfte + Überweisungen erledigen",
+    "Steuerberater-Unterlagen zusammenstellen",
+    "neues Mitglied einarbeiten",
+  ]],
+  [100, [
+    "Monatsabrechnung mit dem Steuerberater",
+    "komplette Kühlraum-Inventur durchführen",
+    "Buchhaltung für eine Woche aufholen",
+    "alle Mitarbeiterstunden der Woche prüfen",
+    "Jahresvergleich mit dem Vorjahrsmonat erstellen",
+    "neues Gericht entwickeln und kalkulieren",
+  ]],
+  [140, [
+    "kompletten Wochenplan für alle Mitarbeiter",
+    "HACCP-Dokumentation für einen Monat",
+    "Preiskalkulation für die gesamte Speisekarte",
+    "Lieferanten-Jahresgespräch vorbereiten",
+    "gesamte Lohnabrechnung eines Mitarbeiters",
+    "Marketingplan für nächsten Monat",
+  ]],
+  [200, [
+    "Quartals-Reporting komplett erstellen",
+    "alle Lieferantenverträge sichten + vergleichen",
+    "gesamtes Team-Feedback-Gespräch führen",
+    "Jahresbudget-Planung für Getränke",
+    "DATEV-Vorbereitung für einen Monat",
+    "neue Speisekarte von Grund auf kalkulieren",
+  ]],
+  [300, [
+    "komplette Jahresinventur durchführen",
+    "Jahresabschluss-Unterlagen vorbereiten",
+    "gesamtes Qualitätsmanagement-Audit",
+    "drei Lieferanten-Angebote einholen und vergleichen",
+    "komplette Betriebsprüfungs-Dokumentation",
+    "Expansionsplanung für einen neuen Standort",
+  ]],
+];
+
+function zeitVergleich(min: number, seed: number): string {
+  if (min <= 0) return "";
+  const bucket = [...ZEIT_POOLS].reverse().find(([threshold]) => min >= threshold);
+  if (!bucket || bucket[1].length === 0) return "";
+  return bucket[1][seed % bucket[1].length];
+}
+
 // ─── Persönliche, warme Begrüßung (Tageszeit + Psychologie) ───────────────
-function GreetingHero({ vorname, stats, pending, onNew }: { vorname: string; stats: any; pending: number; onNew: () => void }) {
+function GreetingHero({ vorname, stats, pending, onNew, standortName }: { vorname: string; stats: any; pending: number; onNew: () => void; standortName?: string }) {
   const [mounted, setMounted] = useState(false);
   const [streak, setStreak] = useState(0);
   const [variant, setVariant] = useState(0);
@@ -225,6 +301,16 @@ function GreetingHero({ vorname, stats, pending, onNew }: { vorname: string; sta
             <span className="text-white">.</span>
           </h1>
 
+          {standortName && (
+            <div className="mt-2 flex items-center gap-1.5">
+              <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ color: "var(--text-faint)" }}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
+              </svg>
+              <span className="text-[13px] font-medium" style={{ color: "var(--text-faint)" }}>{standortName}</span>
+            </div>
+          )}
+
           <p className="mt-2.5 max-w-xl text-[13.5px] text-muted">{tagline}</p>
           {mounted && (
             <p className="mt-1 text-[11.5px] capitalize" style={{ color: "var(--text-faint)" }}>{dateStr}</p>
@@ -265,6 +351,8 @@ export default function DashboardPage() {
   const [vorname, setVorname] = useState("");
   const [ankuendigung, setAnkuendigung] = useState<PlattformEinstellungen | null>(null);
   const [features, setFeatures] = useState<Record<string, boolean>>({});
+  // Zufalls-Basis für Zeitvergleich: ändert sich bei jedem Seitenaufruf
+  const [zeitBase] = useState(() => Math.floor(Math.random() * 97));
 
   useEffect(() => { init(); }, []);
 
@@ -467,6 +555,13 @@ export default function DashboardPage() {
             stats={stats}
             pending={lieferungen.filter((l: any) => !l.freigabe_erteilt).length}
             onNew={() => router.push("/lieferung/neu")}
+            standortName={
+              aktiverStandort !== "alle"
+                ? standorte.find(s => s.id === aktiverStandort)?.name
+                : standorte.length === 1
+                ? standorte[0].name
+                : undefined
+            }
           />
 
           {/* KPI Cards — kompakt, Lieferungen stehen im Fokus */}
@@ -481,7 +576,8 @@ export default function DashboardPage() {
               {
                 label: "Zeit gespart",
                 value: zeitWert, decimals: zeitDecimals, suffix: zeitSuffix,
-                sub: `${MINUTEN_PRO_LIEFERUNG} Min pro Prüfung`,
+                sub: `${stats.zeitMin} Min · ${stats.checked} ${stats.checked === 1 ? "Prüfung" : "Prüfungen"}`,
+                vergleich: zeitVergleich(stats.zeitMin, zeitBase + stats.checked),
                 icon: <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />,
               },
               {
@@ -490,7 +586,7 @@ export default function DashboardPage() {
                 sub: stats.mitAb === 1 ? "Lieferung korrigiert" : "Lieferungen korrigiert",
                 icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />,
               },
-            ] as Array<{ label: string; value: number; decimals: number; sub: string; icon: React.ReactNode; prefix?: string; suffix?: string }>).map((s, i) => (
+            ] as Array<{ label: string; value: number; decimals: number; sub: string; icon: React.ReactNode; prefix?: string; suffix?: string; vergleich?: string }>).map((s, i) => (
               <SpotlightCard key={s.label}
                 className="group relative overflow-hidden rounded-xl p-4 reveal hover-lift"
                 style={{
@@ -515,6 +611,11 @@ export default function DashboardPage() {
                   <AnimatedNumber value={s.value} prefix={s.prefix || ""} suffix={s.suffix || ""} decimals={s.decimals} ready={!loading} />
                 </p>
                 <p className="mt-1.5 text-[11px] text-muted">{s.sub}</p>
+                {s.vergleich && (
+                  <p className="mt-1 text-[10.5px] font-medium" style={{ color: "var(--green)", opacity: 0.8 }}>
+                    ≈ {s.vergleich}
+                  </p>
+                )}
               </SpotlightCard>
             ))}
           </div>
