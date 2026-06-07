@@ -27,7 +27,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const email = chefUser?.user?.email;
     if (!email) return NextResponse.json({ error: "Chef-Konto hat keine E-Mail" }, { status: 400 });
 
-    const origin = process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin;
+    // Auf Vercel enthält new URL(request.url).origin manchmal eine interne URL.
+    // x-forwarded-host ist zuverlässiger und enthält immer den echten Hostnamen.
+    const fwdHost = request.headers.get("x-forwarded-host");
+    const fwdProto = request.headers.get("x-forwarded-proto") || "https";
+    const origin =
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      (fwdHost ? `${fwdProto}://${fwdHost}` : new URL(request.url).origin);
     const { data, error: linkErr } = await admin.auth.admin.generateLink({
       type: "magiclink",
       email,

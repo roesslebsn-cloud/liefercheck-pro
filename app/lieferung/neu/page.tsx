@@ -16,32 +16,45 @@ export default function NeueLieferungPage() {
   const [lieferanten, setLieferanten] = useState<Lieferant[]>([]);
   const [selectedLieferantId, setSelectedLieferantId] = useState<string>("");
 
+  const [creating, setCreating] = useState(false);
+
   useEffect(() => {
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     setSelectedDate(today);
-    createNewLieferung();
     getLieferanten().then(setLieferanten).catch(console.error);
   }, []);
 
-  const createNewLieferung = async () => {
+  // Lieferung wird erst angelegt, wenn der Nutzer wirklich einen Schritt startet
+  const ensureLieferung = async (pendingLieferantId?: string): Promise<string | null> => {
+    if (lieferungId) return lieferungId;
+    setCreating(true);
     try {
-      const result = await saveLieferung({
-        pfand_items: undefined,
-        lieferschein_data: undefined,
-      });
-      if (result && result.id) {
-        setLieferungId(result.id);
+      const result = await saveLieferung({ pfand_items: undefined, lieferschein_data: undefined });
+      if (result?.id) {
+        const newId = result.id;
+        setLieferungId(newId);
+        const lid = pendingLieferantId ?? selectedLieferantId;
+        if (lid) await updateLieferung(newId, { lieferant_id: lid });
+        return newId;
       }
     } catch (error) {
       console.error("Fehler beim Erstellen der Lieferung:", error);
+    } finally {
+      setCreating(false);
     }
+    return null;
   };
 
   const handleLieferantChange = async (lieferantId: string) => {
     setSelectedLieferantId(lieferantId);
-    if (lieferungId) {
-      await updateLieferung(lieferungId, { lieferant_id: lieferantId || undefined });
+    // Lieferung sofort anlegen, sobald ein Lieferant gewählt wurde
+    if (lieferantId) {
+      const id = await ensureLieferung(lieferantId);
+      if (id && lieferungId) {
+        // Falls bereits vorhanden, nur aktualisieren
+        await updateLieferung(id, { lieferant_id: lieferantId });
+      }
     }
   };
 
@@ -55,6 +68,16 @@ export default function NeueLieferungPage() {
     const params = new URLSearchParams({ id: lieferungId });
     if (selectedDate) params.set("date", selectedDate);
     return `/lieferung/${step}?${params.toString()}`;
+  };
+
+  const handleStepClick = async (e: React.MouseEvent<HTMLAnchorElement>, stepName: string) => {
+    e.preventDefault();
+    if (!selectedDate) return;
+    const id = await ensureLieferung();
+    if (!id) return;
+    const params = new URLSearchParams({ id });
+    if (selectedDate) params.set("date", selectedDate);
+    router.push(`/lieferung/${stepName}?${params.toString()}`);
   };
 
   const isLieferTag = (date: Date) => {
@@ -148,6 +171,15 @@ export default function NeueLieferungPage() {
           <p className="mt-3 max-w-xl text-muted">
             Folgen Sie den 5 Schritten, um Ihre Lieferung vollständig zu prüfen.
           </p>
+          {creating && (
+            <div className="mt-4 inline-flex items-center gap-2 text-sm text-accent">
+              <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Lieferung wird angelegt…
+            </div>
+          )}
 
           {lieferanten.length > 0 && (
             <div className="mt-8 rounded-xl border border-border bg-surface-elevated p-6">
@@ -386,17 +418,20 @@ export default function NeueLieferungPage() {
             ].map((item) => {
               const stepNames = ["pfand", "lieferschein", "abgleich", "rechnung", "freigabe"];
               const stepUrl = buildStepUrl(stepNames[item.step - 1]);
+              const stepName = stepNames[item.step - 1];
               return (
               <a
                 key={item.step}
                 href={stepUrl}
                 className={`group rounded-xl border p-6 transition-colors ${
-                  selectedDate && lieferungId
+                  selectedDate
                     ? "border-border bg-surface-elevated hover:border-accent/50"
                     : "border-border bg-surface-elevated/50 opacity-50 cursor-not-allowed"
                 }`}
                 onClick={(e) => {
-                  if (!selectedDate || !lieferungId) e.preventDefault();
+                  if (!selectedDate) { e.preventDefault(); return; }
+                  if (creating) { e.preventDefault(); return; }
+                  handleStepClick(e, stepName);
                 }}
               >
                 <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-accent-muted/50 text-accent group-hover:bg-accent group-hover:text-white transition-colors">

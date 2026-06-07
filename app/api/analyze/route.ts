@@ -8,7 +8,7 @@ const anthropic = new Anthropic({
 // Vision-Analysen koennen laenger dauern – Timeout auf 60s anheben (Vercel)
 export const maxDuration = 60;
 
-const MODEL = "claude-sonnet-4-5";
+const MODEL = "claude-sonnet-4-6";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -248,44 +248,45 @@ AUSGABE NUR ALS JSON, kein Text davor oder danach:
       }
 
       const systemPrompt =
-        "Du bist ein extrem sorgfältiger OCR-Experte für deutsche Getränke-Großhandel-Lieferscheine (GLH/Gefako). Du transkribierst jeden Artikelnamen ZEICHEN FÜR ZEICHEN exakt so, wie er gedruckt ist – du normalisierst, übersetzt, ergänzt oder erfindest NIEMALS etwas. Die gedruckte Menge gilt immer, außer es steht genau ein vereinbartes handschriftliches Zeichen daneben. Ergebnis ausschließlich über das bereitgestellte Tool.";
+        "Du bist ein extrem sorgfältiger OCR-Experte für deutsche Getränke-Großhandel-Lieferscheine (GLH/Gefako/Lüning/Radeberger). Du transkribierst jeden Artikelnamen ZEICHEN FÜR ZEICHEN exakt so, wie er gedruckt ist. Du erfindest, normalisierst oder ergänzt NIEMALS etwas. Jede Zeile der Tabelle muss einzeln gelesen werden. Ergebnis ausschließlich über das bereitgestellte Tool.";
 
-      const prompt = `Lies diesen Lieferschein eines deutschen Getränke-Fachgroßhandels.
+      const prompt = `Lies diesen Lieferschein eines deutschen Getränke-Fachgroßhandels sorgfältig Zeile für Zeile.
 
-WICHTIGSTE REGEL – ARTIKELNAMEN WORTGETREU ABSCHREIBEN:
-- Übernimm den Artikelnamen EXAKT wie gedruckt, Zeichen für Zeichen – inklusive Abkürzungen ("Schäff.", "Allg.", "Nek.", "alkfr."), Punkten, Schrägstrichen, Zahlen und Sonderzeichen.
-- ERFINDE NIEMALS einen Namen und „verschönere" nichts. Schreibe NICHT den vermuteten vollständigen Produktnamen, sondern nur das, was wirklich auf dem Papier steht.
-- Wenn ein Name teils unleserlich ist: transkribiere den lesbaren Teil und setze unsicher = true. Rate KEIN plausibles Produkt dazu.
-- Übernimm die vorangestellte Artikelnummer (z.B. 00832) separat im Feld artikelnummer – sie ist der sicherste Anker für die Identität der Position.
-- Lies langsam und Zeile für Zeile von oben nach unten. Überspringe keine Zeile und füge keine Zeile hinzu, die nicht im Bild steht.
+SCHRITT 1 – TABELLENSTRUKTUR ERKENNEN:
+Finde die Datentabelle. Typische Spalten von links nach rechts:
+  Artikelnummer (5-stellig, z.B. 00832) | Artikelname | Menge | Eh (Einheit) | Gebinde/Größe | ggf. Preis
+Lese JEDE Datenzeile einzeln von oben nach unten. Überspringe KEINE Zeile.
 
-TABELLENAUFBAU:
-- Spalten: "Artikel" (mit vorangestellter Artikelnummer wie 00832, 01141), "Menge", "Eh" (Einheit: Kasten, Fass, Flasche).
-- Erfasse für JEDE Zeile die GEDRUCKTE Menge und die Einheit exakt.
+SCHRITT 2 – ARTIKELNAMEN WORTGETREU ABSCHREIBEN:
+- Übernimm den Artikelnamen EXAKT wie gedruckt, Zeichen für Zeichen – inklusive Abkürzungen ("Schäff.", "Allg.", "Nek.", "alkfr.", "Wh."), Punkten, Schrägstrichen, Zahlen und Sonderzeichen.
+- Schreibe NICHT den vermuteten Vollnamen; schreibe NUR das, was auf dem Papier steht.
+- Die vorangestellte Artikelnummer (z.B. 00832) gehört in das Feld "artikelnummer" (nicht in den Artikelnamen).
+- Wenn ein Name teils unleserlich ist: transkribiere den lesbaren Teil → unsicher = true.
 
-HANDSCHRIFT – FESTER CODE, halte dich EXAKT daran (sehr wichtig):
-Die GEDRUCKTE Menge gilt IMMER, AUSSER es steht genau eines dieser zwei Zeichen direkt bei der Position:
+SCHRITT 3 – MENGEN LESEN:
+Lies die Mengenspalte ("Menge" oder ähnlich) für jede Zeile. Das ist meist eine kleine Zahl (1–50) links neben der Einheitenspalte. Verwechsle diese NICHT mit:
+- Artikelnummern (5-stellig)
+- Gebindegrößen ("24x0,33", "6x1,0", "30 l") – diese kommen ins Feld "groesse"
+- Seitenzahlen oder Tourennummern
 
-1) EINGEKREISTE ZAHL = eine handschriftliche Zahl mit einem per Hand gezogenen Kreis/Oval drumherum.
-   → Das ist die tatsächlich gelieferte Menge und ÜBERSCHREIBT die gedruckte Menge.
-   → Setze: menge = die eingekreiste Zahl, menge_gedruckt = die gedruckte Zahl, korrigiert = true.
+SCHRITT 4 – HANDSCHRIFTLICHE MARKIERUNGEN (sehr genau beachten):
+Die GEDRUCKTE Menge gilt IMMER – außer bei diesen zwei Ausnahmen:
 
-2) "F" / "fehlt" / "fehlend" ODER durchgestrichene Zeile = Artikel NICHT geliefert.
-   → Trage ihn in "nicht_geliefert" ein (mit menge_gedruckt) und NICHT in "gelieferte_artikel".
+A) EINGEKREISTE ZAHL: Eine handschriftliche Zahl mit einem Kreis/Oval drumherum direkt neben der Position.
+   → menge = eingekreiste Zahl, menge_gedruckt = gedruckte Zahl, korrigiert = true.
 
-ALLES ANDERE ändert die Menge NICHT:
-- Eine Position OHNE jede Markierung gilt als normal geliefert mit der GEDRUCKTEN Menge. Ein Häkchen ist NICHT erforderlich – nicht markierte Zeilen sind völlig normal und kommen mit ihrer gedruckten Menge in "gelieferte_artikel".
-- Ein Häkchen (✓), Haken, Strich oder Kringel OHNE Zahl bedeutet nur "geprüft/in Ordnung" und ist optional. NIEMALS als Menge oder Korrektur werten.
-- Eine handschriftliche Zahl, die NICHT eingekreist ist, ist KEINE Korrektur → gedruckte Menge gilt.
-- Lose Zahlen außerhalb der Mengen-Spalte (Seitenzahl wie "von 4", Tour-Nr., Gewicht, Unterschrift, Datum) strikt ignorieren.
+B) "F", "fehlt", "fehlend" oder durchgestrichene Zeile:
+   → Position in "nicht_geliefert" eintragen (mit menge_gedruckt), NICHT in "gelieferte_artikel".
 
-UNSICHERHEIT:
-- Wenn du nicht eindeutig erkennen kannst, ob eine Zahl wirklich eingekreist ist oder ob "fehlt" dasteht, nimm deine beste Annahme UND setze für diese Position unsicher = true.
+Was die Menge NICHT ändert:
+- Häkchen (✓), Kringel ohne Zahl, Unterschriften → nur "geprüft", keine Mengenkorrektur.
+- Handschriftliche Zahl OHNE Kreis → keine Korrektur.
+- Lose Zahlen außerhalb der Mengenspalte (Seitenzahl "2 von 4", Gewicht, Tour-Nr.) → ignorieren.
 
-MEHRSEITIG:
-- Mehrere Bilder gehören zur SELBEN Lieferung ("Seite 1 von 4" …). Führe alles zu EINER Liste zusammen, jede Position nur einmal.
+SCHRITT 5 – MEHRSEITIG:
+Mehrere Bilder ("Seite 1 von 4" …) gehören zur SELBEN Lieferung. Alles zu EINER Liste zusammenführen.
 
-Gib das vollständige Ergebnis ausschließlich über das Tool "lieferschein_erfassen" zurück. Erfinde nichts.`;
+Gib das vollständige Ergebnis ausschließlich über das Tool "lieferschein_erfassen" zurück. Erfinde KEINE Positionen.`;
 
       const message = await anthropic.messages.create({
         model: MODEL,
@@ -362,28 +363,44 @@ Gib das Ergebnis ausschließlich über das Tool "bestellung_erfassen" zurück.`;
 
       const prompt = `Vergleiche Bestellung (Soll) und Lieferschein (Ist). Ziel: ausschließlich ECHTE Abweichungen finden.
 
+DATENFORMAT BESTELLUNG – AUTOMATISCH ERKENNEN:
+Die Bestelldaten können in zwei Formaten vorliegen:
+  Format A (aus Bild-Extraktion, normalisiert): {"artikel": "Name", "menge": 2, "gebinde": "..."}
+  Format B (Gastronovi-CSV, Rohdaten): Felder wie "Bezeichnung"/"Artikel"/"Artikelname"/"Artikelbez." für den Namen und "Menge"/"Bestellmenge"/"Anzahl" für die Menge.
+Erkenne das Format automatisch. Bei Format B: Nutze den Bezeichnungs-/Artikel-Wert als Artikelname und den Mengen-Wert (als Zahl) als Bestellmenge. Ignoriere Preis-, Nummern- und sonstige Felder für den Abgleich.
+
 EINHEITEN:
-- Beide Seiten zählen in Bestelleinheiten (Kasten, Fass, Flasche). Vergleiche bestellte Menge gegen gelieferte Menge in DIESEN Einheiten.
+- Beide Seiten zählen in Bestelleinheiten (Kasten, Fass, Flasche). Vergleiche bestellte Menge gegen gelieferte Menge in diesen Einheiten.
 - Ignoriere Detail-Aufschlüsselungen wie "st", "l", "6 x 1,0", "24x0,2".
 
-ARTIKEL ZUORDNEN (großzügig nach Name, ignoriere Groß/Klein, Reihenfolge, Zusätze wie "Glasflasche/Flasche/PET/Nektar/Saft/naturtrüb/Glas", Marken- und Größenangaben). Diese Paare gehören z.B. zusammen:
+ARTIKEL ZUORDNEN – großzügig nach Name-Ähnlichkeit:
+Ignoriere: Groß-/Kleinschreibung, Wortstellung, Füllwörter (Glasflasche/Flasche/PET/Nektar/Saft/naturtrüb/Glas/Kiste).
+Abkürzungen auf dem Lieferschein stehen für den vollen Gastronovi-Namen. Beispiele:
 - "Granini Maracuja-Nektar Glasflasche" ↔ "Granini Maracuja Nek. 6 x 1,0"
+- "Granini Orangensaft Glasflasche" ↔ "Gran. Orange 6x1,0"
 - "Schweppes Russian Wild Berry PET" ↔ "Schweppes Wild Berry 6x1,0"
 - "Schöfferhofer Weizen 0,00% alkoholfrei" ↔ "Schöff. Hefe alkfrei 0,0% 20x0,5"
+- "Schöfferhofer Weizenmischbier Grapefruit" ↔ "Schöff. Grap. 20x0,5"
 - "Allgäuer Büble Bayrisch Hell" ↔ "Allg. Büble Bay. hell 30 l"
+- "Allgäuer Büble Bayrisch Hell Flasche" ↔ "Allg. Büble Bay. hell 20x0,5"
 - "Clausthaler Classic alkoholfrei 0,33" ↔ "Clausth. Classic 24x0,33"
+- "Selters Medium Glasflasche" ↔ "Selters med. Glas 24x0,25"
+- "Selters Classic PET" ↔ "Selters classic PET 6x1,0"
+- "Coca-Cola Classic" ↔ "Coca Cola Class. 24x0,2"
+- "Fanta Orange" ↔ "Fanta Orange 24x0,2"
+Wenn zwei Namen ≥60% Übereinstimmung haben, sind es DIESELBEN Artikel.
 
 STATUS-REGELN (strikt):
-- Mengen gleich → "ok". Das ist der NORMALFALL – die allermeisten Positionen sind "ok".
-- Artikel steht im Lieferschein unter "nicht_geliefert" (als "fehlt"/durchgestrichen markiert) → "nicht_geliefert", geliefert = 0. Als bestellte Menge die ursprüngliche Bestellmenge verwenden (menge_urspruenglich, sonst menge).
-- Bestellt, aber gar nicht auf dem Lieferschein → "nicht_geliefert".
-- Auf dem Lieferschein, aber nicht bestellt → "nicht_bestellt".
-- Bestellt N, geliefert M, und N ≠ M → "abweichung" (abweichung = M − N).
+- Mengen identisch → "ok". Das ist der NORMALFALL.
+- Artikel in Lieferschein "nicht_geliefert" (als "fehlt"/durchgestrichen) → "nicht_geliefert", geliefert = 0.
+- Bestellt, aber komplett fehlend im Lieferschein → "nicht_geliefert".
+- Nur auf dem Lieferschein, nicht bestellt → "nicht_bestellt".
+- Mengen verschieden (N ≠ M) → "abweichung" (abweichung = M − N).
 
-GANZ WICHTIG:
-- Häkchen, Unterschriften, Seitenzahlen sind KEINE Mengen. Leite daraus NIEMALS eine Abweichung ab.
-- Wenn die Mengen übereinstimmen, MUSS der Status "ok" sein. Im Zweifel "ok".
-- Für die bestellte Menge nutzt du die aktuelle Gastronovi-Menge (menge); die ursprüngliche Menge nur, um einen als "fehlt" markierten Artikel korrekt als nicht_geliefert zu kennzeichnen.
+WICHTIG:
+- Im Zweifel: Status "ok". Niemals eine Abweichung erfinden.
+- Für die bestellte Menge: aktuelle Gastronovi-Menge (Feld "menge"); ursprüngliche Menge (menge_urspruenglich) nur für nicht_geliefert-Kennzeichnung.
+- Häkchen/Unterschriften/Seitenzahlen sind KEINE Mengen.
 
 Bestellung (Gastronovi, Soll):
 ${JSON.stringify(data.bestellung)}

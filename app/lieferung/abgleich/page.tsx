@@ -74,13 +74,36 @@ function AbgleichPageContent() {
 
   const parseCSV = (text: string) => {
     const lines = text.split("\n").filter((l) => l.trim());
-    const headers = lines[0].split(/[,;]/).map((h) => h.trim());
-    return lines.slice(1).map((line) => {
-      const values = line.split(/[,;]/).map((v) => v.trim());
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(/[,;]/).map((h) => h.trim().replace(/^"|"$/g, ""));
+    const rows = lines.slice(1).map((line) => {
+      const values = line.split(/[,;]/).map((v) => v.trim().replace(/^"|"$/g, ""));
       const obj: any = {};
-      headers.forEach((h, i) => (obj[h] = values[i]));
+      headers.forEach((h, i) => (obj[h] = values[i] ?? ""));
       return obj;
     });
+    // Normalisierung: Gastronovi-CSV-Spalten auf einheitliches Format mappen
+    return rows.map((row) => {
+      const nameKey = Object.keys(row).find((k) =>
+        /bezeich|artikel(?!nr|num)|name|produkt/i.test(k)
+      );
+      const mengeKey = Object.keys(row).find((k) =>
+        /^menge$|bestellmenge|anzahl|qty/i.test(k)
+      );
+      const gebindeKey = Object.keys(row).find((k) =>
+        /gebinde|einheit|unit|groesse|größe/i.test(k)
+      );
+      if (nameKey && mengeKey) {
+        return {
+          artikel: row[nameKey] || "",
+          menge: parseFloat(String(row[mengeKey]).replace(",", ".")) || 0,
+          gebinde: gebindeKey ? row[gebindeKey] : undefined,
+          _raw: row, // Rohdaten zur Fehlersuche behalten
+        };
+      }
+      // Fallback: Rohdaten übergeben (KI erkennt das Format selbst)
+      return row;
+    }).filter((r) => r.artikel !== "" && r.menge !== 0);
   };
 
   const handleAnalyze = async () => {

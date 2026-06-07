@@ -381,6 +381,9 @@ function ImpersonateModal({ id, chefEmail, onClose }: { id: string; chefEmail: s
         ⚠️ Hinweis: Der Login-Link ersetzt im neuen Tab deine aktuelle Sitzung. Um wieder als Admin zu arbeiten, melde dich dort anschließend ab oder nutze ein separates Browser-Profil.
       </div>
       {error && <p className="mt-2 text-[12px] text-red-400">{error}</p>}
+      <p className="mt-2 text-[11px] text-muted">
+        Tipp: Falls du auf eine Fehlerseite weitergeleitet wirst, stelle sicher, dass deine Vercel-Domain in den Supabase-Einstellungen unter Authentication → URL Configuration als erlaubte Redirect-URL eingetragen ist.
+      </p>
       <div className="flex gap-2 justify-end pt-4"><button onClick={onClose} className="btn-secondary">Abbrechen</button><button onClick={go} disabled={busy} className="btn-primary">{busy ? "…" : "Login-Link öffnen"}</button></div>
     </ModalShell>
   );

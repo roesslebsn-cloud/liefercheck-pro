@@ -6,7 +6,7 @@
 //  • Qualität bleibt erhalten (die API skaliert ohnehin auf ~diese Größe)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const MAX_EDGE = 1568; // empfohlene maximale Kantenlänge für die Vision-API
+const MAX_EDGE = 2048; // Maximale Kantenlänge für die Vision-API – höher = bessere OCR bei Lieferscheinen
 
 export function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -69,7 +69,8 @@ export async function pdfToImages(file: File, maxEdge = MAX_EDGE, quality = 0.95
     const page = await pdf.getPage(i);
     const baseViewport = page.getViewport({ scale: 1 });
     const longest = Math.max(baseViewport.width, baseViewport.height);
-    const scale = Math.min(2, (maxEdge / longest) * 1.0) || 1.5;
+    // Scale erhöht auf 3.0 max für bessere OCR-Qualität bei gedruckten Dokumenten
+    const scale = Math.min(3, (maxEdge / longest) * 1.5) || 2.0;
     const viewport = page.getViewport({ scale: scale > 0 ? scale : 1.5 });
 
     const canvas = document.createElement("canvas");
