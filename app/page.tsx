@@ -35,7 +35,6 @@ export default function LoginPage() {
             {[
               { icon: "✓", text: "GoBD-konform" },
               { icon: "⚡", text: "Ergebnis in 5 Min" },
-              { icon: "€", text: "Ø €120 pro Lieferung" },
             ].map(chip => (
               <span key={chip.text} className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium"
                 style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)", color: "var(--text-muted)" }}>
