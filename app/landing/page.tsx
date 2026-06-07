@@ -62,28 +62,53 @@ const features = [
 const pricing = [
   {
     name: "Starter",
-    price: "Kostenlos",
-    period: "",
-    desc: "Zum Ausprobieren",
-    features: ["5 Lieferungen/Monat", "1 Nutzer", "KI-Lieferscheinanalyse", "PDF-Export"],
-    cta: "Jetzt starten",
+    price: "30€",
+    period: "/Monat",
+    desc: "Für den Einstieg",
+    note: "Kostenloser Ersttermin · Jederzeit kündbar",
+    features: [
+      "5 Lieferungen/Monat",
+      "1 Nutzer · 2 Standorte · 3 Mitarbeiter",
+      "KI-Lieferscheinanalyse",
+      "PDF-Export",
+      "Personalisierte Einrichtung Ihrer Unternehmensstruktur",
+    ],
+    cta: "Kostenlos testen",
     highlight: false,
   },
   {
     name: "Pro",
-    price: "49€",
+    price: "60€",
     period: "/Monat",
     desc: "Für aktive Betriebe",
-    features: ["Unbegrenzte Lieferungen", "3 Nutzer", "E-Rechnung (XRechnung/ZUGFeRD)", "Wochenberichte", "Analytics-Dashboard", "E-Mail-Rechnungseingang"],
+    note: "14 Tage gratis · Dann 60 €/Monat · Kein Risiko",
+    features: [
+      "15 Lieferungen/Monat",
+      "3 Nutzer · 2 Standorte · 3 Mitarbeiter/Standort",
+      "E-Rechnung (XRechnung / ZUGFeRD)",
+      "Wochenberichte per E-Mail",
+      "Analytics-Dashboard",
+      "E-Mail-Rechnungseingang",
+      "Personalisierte Einrichtung Ihrer Unternehmensstruktur",
+    ],
     cta: "14 Tage kostenlos testen",
     highlight: true,
   },
   {
     name: "Business",
-    price: "149€",
+    price: "130€",
     period: "/Monat",
-    desc: "Für größere Teams",
-    features: ["Alles in Pro", "10 Nutzer", "DATEV-Export", "API-Zugang", "Audit-Trail", "Priority-Support"],
+    desc: "Für wachsende Betriebe",
+    note: "Persönliche Beratung · Individuelles Onboarding",
+    features: [
+      "Unbegrenzte Lieferungen",
+      "Unbegrenzte Nutzer & Standorte",
+      "DATEV-Export",
+      "API-Zugang (Anbindung an ERP & Warenwirtschaft)",
+      "Audit-Trail (GoBD-konforme Protokollierung aller Freigaben)",
+      "Priority-Support",
+      "Personalisierte Einrichtung Ihrer Unternehmensstruktur",
+    ],
     cta: "Kontakt aufnehmen",
     highlight: false,
   },
@@ -405,41 +430,70 @@ export default function LandingPage() {
         <div className="mx-auto max-w-5xl">
           <div className="text-center">
             <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Einfache, faire Preise</h2>
-            <p className="mt-4 text-white/60">Starten Sie kostenlos. Wachsen Sie mit Ihrem Betrieb.</p>
+            <p className="mt-4 text-white/60">
+              Kein Abo ohne Gespräch. Jedes Paket wird persönlich eingerichtet – passend zu Ihrem Betrieb.
+            </p>
           </div>
           <div className="mt-16 grid gap-6 sm:grid-cols-3">
             {pricing.map((plan) => (
-              <div key={plan.name} className={`relative rounded-2xl border p-8 ${plan.highlight ? "border-blue-500/50 bg-blue-500/10 ring-1 ring-blue-500/20" : "border-white/[0.08] bg-white/[0.03]"}`}>
+              <div
+                key={plan.name}
+                className={`relative flex flex-col rounded-2xl border p-8 ${
+                  plan.highlight
+                    ? "border-blue-500/50 bg-blue-500/10 ring-1 ring-blue-500/20"
+                    : "border-white/[0.08] bg-white/[0.03]"
+                }`}
+              >
                 {plan.highlight && (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-blue-500 px-3 py-1 text-xs font-semibold text-white">
                     Beliebteste Wahl
                   </div>
                 )}
-                <div className="text-sm font-semibold text-white/60">{plan.name}</div>
-                <div className="mt-2 flex items-baseline gap-1">
-                  <span className="text-4xl font-bold">{plan.price}</span>
-                  <span className="text-sm text-white/50">{plan.period}</span>
+
+                {/* Plan-Name + Preis */}
+                <div className="text-sm font-semibold uppercase tracking-widest text-white/40">{plan.name}</div>
+                <div className="mt-3 flex items-baseline gap-1">
+                  <span className="text-4xl font-bold tracking-tight">{plan.price}</span>
+                  <span className="text-sm text-white/40">{plan.period}</span>
                 </div>
-                <div className="mt-1 text-xs text-white/40">{plan.desc}</div>
-                <ul className="mt-6 space-y-2">
+                <div className="mt-1 text-[13px] text-white/40">{plan.desc}</div>
+
+                {/* Divider */}
+                <div className="my-6 border-t border-white/[0.07]" />
+
+                {/* Features */}
+                <ul className="flex-1 space-y-3">
                   {plan.features.map((f) => (
-                    <li key={f} className="flex items-center gap-2 text-sm text-white/70">
-                      <svg className="h-4 w-4 flex-shrink-0 text-blue-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <li key={f} className="flex items-start gap-2.5 text-[13.5px] text-white/70">
+                      <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-400" fill="none" viewBox="0 0 24 24" strokeWidth={2.2} stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
                       </svg>
                       {f}
                     </li>
                   ))}
                 </ul>
+
+                {/* CTA */}
                 <button
                   onClick={() => openModal(plan.name)}
-                  className={`mt-8 block w-full rounded-xl px-6 py-3 text-center text-sm font-semibold transition-colors ${plan.highlight ? "bg-blue-600 text-white hover:bg-blue-500" : "border border-white/10 bg-white/5 text-white hover:bg-white/10"}`}
+                  className={`mt-8 w-full rounded-xl px-6 py-3 text-center text-sm font-semibold transition-colors ${
+                    plan.highlight
+                      ? "bg-blue-600 text-white hover:bg-blue-500"
+                      : "border border-white/10 bg-white/5 text-white hover:bg-white/10"
+                  }`}
                 >
                   {plan.cta}
                 </button>
+                <p className="mt-2.5 text-center text-[11px] text-white/30">{plan.note}</p>
               </div>
             ))}
           </div>
+
+          {/* Unterzeile */}
+          <p className="mt-10 text-center text-sm text-white/35">
+            Alle Pakete beinhalten eine persönliche Einrichtung Ihrer Lieferanten, Standorte und Unternehmensstruktur.
+            Kein Vertrag. Monatlich kündbar.
+          </p>
         </div>
       </section>
 
