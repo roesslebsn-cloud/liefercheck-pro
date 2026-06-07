@@ -68,7 +68,7 @@ export default function AdminUebersichtPage() {
 
   const k = data?.kpis;
 
-  const kpiCards = [
+  const kpiCards: { label: string; value: number; sub: string; prefix?: string; decimals?: number }[] = [
     { label: "Kunden gesamt", value: k?.kundenGesamt ?? 0, sub: `${k?.kundenAktiv30 ?? 0} aktiv (30 T)` },
     { label: "Nutzer gesamt", value: k?.nutzerGesamt ?? 0, sub: "über alle Betriebe" },
     { label: "Lieferungen geprüft", value: k?.lieferungenGesamt ?? 0, sub: `${k?.lieferungenWoche ?? 0} diese Woche` },
