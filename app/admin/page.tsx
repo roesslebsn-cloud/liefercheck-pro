@@ -72,7 +72,6 @@ export default function AdminUebersichtPage() {
     { label: "Kunden gesamt", value: k?.kundenGesamt ?? 0, sub: `${k?.kundenAktiv30 ?? 0} aktiv (30 T)` },
     { label: "Nutzer gesamt", value: k?.nutzerGesamt ?? 0, sub: "über alle Betriebe" },
     { label: "Lieferungen geprüft", value: k?.lieferungenGesamt ?? 0, sub: `${k?.lieferungenWoche ?? 0} diese Woche` },
-    { label: "Ersparnis (Plattform)", value: k?.gesamtErsparnis ?? 0, prefix: "€", decimals: 2, sub: "über alle Kunden" },
   ];
 
   return (
