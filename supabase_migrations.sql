@@ -412,3 +412,33 @@ INSERT INTO public.plattform_einstellungen (id) VALUES (1) ON CONFLICT (id) DO N
 --   - 'organisationen' hat status, features, kontakt_email, notiz
 --   - 'plattform_einstellungen' existiert mit genau einer Zeile (id=1)
 -- ═══════════════════════════════════════════════════════════════════════════
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Migration 9: interessenten (Landing-Page-Kontaktformular-Leads)
+-- ═══════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS public.interessenten (
+  id          uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  name        text NOT NULL,
+  firma       text,
+  email       text NOT NULL,
+  telefon     text,
+  paket       text,
+  nachricht   text,
+  status      text DEFAULT 'neu' CHECK (status IN ('neu','kontaktiert','umgewandelt','abgelehnt')),
+  erstellt_am timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.interessenten ENABLE ROW LEVEL SECURITY;
+
+-- Nur Service-Role darf lesen/schreiben (Admin-Seite nutzt anon key mit Supabase Auth-Check)
+-- Fuer den Admin-Tab: anon key + eingeloggt als Super-Admin reicht
+DROP POLICY IF EXISTS "Admins lesen Interessenten" ON public.interessenten;
+CREATE POLICY "Admins lesen Interessenten"
+  ON public.interessenten FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admins aendern Interessenten" ON public.interessenten;
+CREATE POLICY "Admins aendern Interessenten"
+  ON public.interessenten FOR UPDATE
+  USING (auth.role() = 'authenticated');

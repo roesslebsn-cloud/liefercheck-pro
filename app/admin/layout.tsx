@@ -8,6 +8,7 @@ import LogoutButton from "../components/LogoutButton";
 
 const NAV = [
   { label: "Übersicht", path: "/admin" },
+  { label: "Anfragen", path: "/admin/anfragen" },
   { label: "Kunden", path: "/admin/kunden" },
   { label: "Standorte", path: "/admin/standorte" },
   { label: "Plattform", path: "/admin/plattform" },

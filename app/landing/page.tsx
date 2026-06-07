@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 
 const features = [
   {
@@ -90,13 +89,190 @@ const pricing = [
   },
 ];
 
+type FormData = { name: string; firma: string; email: string; telefon: string; nachricht: string };
+
 export default function LandingPage() {
-  const router = useRouter();
-  const [email, setEmail] = useState("");
+  const [heroEmail, setHeroEmail] = useState("");
+
+  // Modal-State
+  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedPaket, setSelectedPaket] = useState("");
+  const [form, setForm] = useState<FormData>({ name: "", firma: "", email: "", telefon: "", nachricht: "" });
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState("");
+
+  function openModal(paket: string, prefillEmail = "") {
+    setSelectedPaket(paket);
+    setForm((f) => ({ ...f, email: prefillEmail || f.email }));
+    setSubmitted(false);
+    setError("");
+    setModalOpen(true);
+    document.body.style.overflow = "hidden";
+  }
+
+  function closeModal() {
+    setModalOpen(false);
+    document.body.style.overflow = "";
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.name.trim() || !form.email.trim()) {
+      setError("Bitte Name und E-Mail ausfüllen.");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      const res = await fetch("/api/kontakt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, paket: selectedPaket }),
+      });
+      if (!res.ok) throw new Error("Fehler beim Senden.");
+      setSubmitted(true);
+    } catch {
+      setError("Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const inputCls = "w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/30 focus:border-blue-500/50 focus:outline-none";
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-white">
-      {/* NAV */}
+
+      {/* ─── KONTAKTFORMULAR-MODAL ──────────────────────────────────────── */}
+      {modalOpen && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
+        >
+          <div className="relative w-full max-w-lg rounded-2xl border border-white/10 bg-[#0f1117] shadow-2xl">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-white/[0.07] px-6 py-5">
+              <div>
+                <h2 className="text-xl font-bold text-white">Jetzt anfragen</h2>
+                <p className="mt-0.5 text-sm text-white/50">
+                  {selectedPaket ? `Paket: ${selectedPaket} · ` : ""}Wir melden uns innerhalb von 24 Stunden.
+                </p>
+              </div>
+              <button
+                onClick={closeModal}
+                className="ml-4 flex h-8 w-8 items-center justify-center rounded-lg text-white/40 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Inhalt */}
+            <div className="px-6 py-6">
+              {submitted ? (
+                // ── Erfolg ──
+                <div className="flex flex-col items-center gap-4 py-8 text-center">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-500/15">
+                    <svg className="h-8 w-8 text-green-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-lg font-semibold text-white">Anfrage eingegangen!</p>
+                    <p className="mt-1 text-sm text-white/55">
+                      Danke, {form.name.split(" ")[0]}! Silas meldet sich persönlich bei Ihnen – in der Regel innerhalb von 24 Stunden.
+                    </p>
+                  </div>
+                  <button
+                    onClick={closeModal}
+                    className="mt-2 rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
+                  >
+                    Schließen
+                  </button>
+                </div>
+              ) : (
+                // ── Formular ──
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-white/60">Name *</label>
+                      <input
+                        type="text"
+                        placeholder="Max Mustermann"
+                        value={form.name}
+                        onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                        className={inputCls}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-white/60">Betrieb / Firma</label>
+                      <input
+                        type="text"
+                        placeholder="Restaurant Muster GmbH"
+                        value={form.firma}
+                        onChange={(e) => setForm((f) => ({ ...f, firma: e.target.value }))}
+                        className={inputCls}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-white/60">E-Mail *</label>
+                      <input
+                        type="email"
+                        placeholder="ihre@email.de"
+                        value={form.email}
+                        onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                        className={inputCls}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-white/60">Telefon</label>
+                      <input
+                        type="tel"
+                        placeholder="+49 123 456789"
+                        value={form.telefon}
+                        onChange={(e) => setForm((f) => ({ ...f, telefon: e.target.value }))}
+                        className={inputCls}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-white/60">Nachricht (optional)</label>
+                    <textarea
+                      rows={3}
+                      placeholder="Kurz beschreiben, was Sie suchen oder welche Fragen Sie haben …"
+                      value={form.nachricht}
+                      onChange={(e) => setForm((f) => ({ ...f, nachricht: e.target.value }))}
+                      className={`${inputCls} resize-none`}
+                    />
+                  </div>
+                  {error && (
+                    <p className="rounded-lg bg-red-500/10 px-4 py-2.5 text-sm text-red-400">{error}</p>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="w-full rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:opacity-60"
+                  >
+                    {submitting ? "Wird gesendet …" : "Anfrage senden"}
+                  </button>
+                  <p className="text-center text-xs text-white/30">
+                    Kein Spam. Keine automatische Registrierung. Silas meldet sich persönlich.
+                  </p>
+                </form>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── NAV ────────────────────────────────────────────────────────── */}
       <nav className="sticky top-0 z-50 border-b border-white/[0.06] bg-[#0a0a0f]/90 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
           <div className="flex items-center gap-3">
@@ -118,7 +294,7 @@ export default function LandingPage() {
         </div>
       </nav>
 
-      {/* HERO */}
+      {/* ─── HERO ───────────────────────────────────────────────────────── */}
       <section className="relative overflow-hidden px-6 py-24 text-center">
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute left-1/2 top-0 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/4 rounded-full bg-blue-600/10 blur-3xl" />
@@ -136,9 +312,12 @@ export default function LandingPage() {
             LieferCheck Pro ist die KI-gestützte Komplettlösung für Gastronomie-Betriebe: Lieferscheine analysieren, Rechnungen prüfen, Abweichungen erkennen – alles in unter 5 Minuten.
           </p>
           <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-            <a href="/" className="rounded-xl bg-blue-600 px-8 py-4 text-base font-semibold text-white transition-colors hover:bg-blue-500">
+            <button
+              onClick={() => openModal("")}
+              className="rounded-xl bg-blue-600 px-8 py-4 text-base font-semibold text-white transition-colors hover:bg-blue-500"
+            >
               Kostenlos starten
-            </a>
+            </button>
             <a href="#features" className="rounded-xl border border-white/10 bg-white/5 px-8 py-4 text-base font-semibold text-white transition-colors hover:bg-white/10">
               Mehr erfahren
             </a>
@@ -147,7 +326,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* STATS */}
+      {/* ─── STATS ──────────────────────────────────────────────────────── */}
       <section className="border-y border-white/[0.06] bg-white/[0.02] px-6 py-12">
         <div className="mx-auto grid max-w-4xl grid-cols-2 gap-8 sm:grid-cols-4">
           {[
@@ -164,7 +343,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* FEATURES */}
+      {/* ─── FEATURES ───────────────────────────────────────────────────── */}
       <section id="features" className="px-6 py-24">
         <div className="mx-auto max-w-6xl">
           <div className="text-center">
@@ -185,7 +364,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* E-RECHNUNG SECTION */}
+      {/* ─── E-RECHNUNG ─────────────────────────────────────────────────── */}
       <section id="erechnung" className="px-6 py-24">
         <div className="mx-auto max-w-4xl overflow-hidden rounded-3xl border border-amber-500/20 bg-amber-500/5">
           <div className="px-8 py-12 sm:px-12">
@@ -221,7 +400,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* PRICING */}
+      {/* ─── PRICING ────────────────────────────────────────────────────── */}
       <section id="pricing" className="px-6 py-24">
         <div className="mx-auto max-w-5xl">
           <div className="text-center">
@@ -252,42 +431,43 @@ export default function LandingPage() {
                     </li>
                   ))}
                 </ul>
-                <a
-                  href="/"
-                  className={`mt-8 block rounded-xl px-6 py-3 text-center text-sm font-semibold transition-colors ${plan.highlight ? "bg-blue-600 text-white hover:bg-blue-500" : "border border-white/10 bg-white/5 text-white hover:bg-white/10"}`}
+                <button
+                  onClick={() => openModal(plan.name)}
+                  className={`mt-8 block w-full rounded-xl px-6 py-3 text-center text-sm font-semibold transition-colors ${plan.highlight ? "bg-blue-600 text-white hover:bg-blue-500" : "border border-white/10 bg-white/5 text-white hover:bg-white/10"}`}
                 >
                   {plan.cta}
-                </a>
+                </button>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* CTA */}
+      {/* ─── CTA / BEREIT LOSZULEGEN ────────────────────────────────────── */}
       <section className="px-6 py-24 text-center">
         <div className="mx-auto max-w-2xl">
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Bereit loszulegen?</h2>
-          <p className="mt-4 text-white/60">Starten Sie jetzt kostenlos. Keine Kreditkarte erforderlich.</p>
+          <p className="mt-4 text-white/60">Tragen Sie Ihre E-Mail ein – Silas meldet sich persönlich bei Ihnen.</p>
           <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
             <input
               type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={heroEmail}
+              onChange={(e) => setHeroEmail(e.target.value)}
               placeholder="ihre@email.de"
               className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/30 focus:border-blue-500/50 focus:outline-none sm:w-72"
             />
-            <a
-              href="/"
+            <button
+              onClick={() => openModal("", heroEmail)}
               className="w-full rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-500 sm:w-auto"
             >
-              Kostenlos registrieren
-            </a>
+              Kostenlos anfragen
+            </button>
           </div>
+          <p className="mt-3 text-xs text-white/30">Kein Spam. Keine automatische Registrierung.</p>
         </div>
       </section>
 
-      {/* FOOTER */}
+      {/* ─── FOOTER ─────────────────────────────────────────────────────── */}
       <footer className="border-t border-white/[0.06] px-6 py-8 text-center text-sm text-white/30">
         <div className="mx-auto max-w-6xl flex flex-col items-center gap-2 sm:flex-row sm:justify-between">
           <span>© {new Date().getFullYear()} LieferCheck Pro</span>
