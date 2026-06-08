@@ -81,8 +81,8 @@ export async function POST(request: NextRequest) {
     const line = (x1: number, yy: number, x2: number, col = C.greyLight, thick = 0.5) =>
       page.drawLine({ start: { x: x1, y: yy }, end: { x: x2, y: yy }, thickness: thick, color: col });
 
-    const box = (x: number, yy: number, w: number, h: number, col: any, radius = 0) =>
-      page.drawRectangle({ x, y: yy, width: w, height: h, color: col, borderRadius: radius });
+    const box = (x: number, yy: number, w: number, h: number, col: any, _radius = 0) =>
+      page.drawRectangle({ x, y: yy, width: w, height: h, color: col });
 
     // ══════════════════════════════════════════════════════════════════════════
     // SEITE 1 – HEADER

@@ -55,7 +55,13 @@ export async function POST(req: NextRequest) {
     END $$;
   `;
 
-  const { error } = await sb.rpc("exec_sql", { sql }).catch(() => ({ error: { message: "rpc nicht verfügbar" } }));
+  let error: { message: string } | null = null;
+  try {
+    const res = await sb.rpc("exec_sql", { sql });
+    error = res.error ? { message: res.error.message } : null;
+  } catch {
+    error = { message: "rpc nicht verfügbar" };
+  }
 
   // Fallback: direkt per raw SQL via REST (Supabase erlaubt das mit service role)
   if (error) {
