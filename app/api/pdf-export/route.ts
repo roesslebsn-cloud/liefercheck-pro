@@ -1,17 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 
-const BLUE = rgb(0.23, 0.51, 0.96);
-const DARK = rgb(0.05, 0.06, 0.09);
-const GREY = rgb(0.45, 0.48, 0.55);
-const LIGHT_GREY = rgb(0.9, 0.91, 0.93);
-const WHITE = rgb(1, 1, 1);
-const GREEN = rgb(0.2, 0.75, 0.45);
-const ORANGE = rgb(0.98, 0.45, 0.09);
-const RED = rgb(0.95, 0.25, 0.25);
+// ── Farbpalette ──────────────────────────────────────────────────────────────
+const C = {
+  navy:      rgb(0.08, 0.10, 0.18),
+  navyLight: rgb(0.12, 0.15, 0.26),
+  accent:    rgb(0.25, 0.47, 0.95),
+  accentBg:  rgb(0.93, 0.96, 1.00),
+  white:     rgb(1, 1, 1),
+  black:     rgb(0.08, 0.09, 0.12),
+  dark:      rgb(0.18, 0.20, 0.26),
+  grey:      rgb(0.50, 0.53, 0.60),
+  greyLight: rgb(0.88, 0.90, 0.93),
+  greyBg:    rgb(0.96, 0.97, 0.98),
+  green:     rgb(0.13, 0.70, 0.40),
+  greenBg:   rgb(0.90, 0.98, 0.93),
+  orange:    rgb(0.95, 0.50, 0.10),
+  orangeBg:  rgb(1.00, 0.96, 0.90),
+  red:       rgb(0.87, 0.20, 0.20),
+  redBg:     rgb(0.99, 0.92, 0.92),
+};
 
-function clamp(text: string, max: number): string {
-  return text.length > max ? text.slice(0, max - 1) + "…" : text;
+const W = 595, H = 842;
+const ML = 52, MR = 52;
+const CW = W - ML - MR;
+
+function clamp(text: string, font: any, size: number, maxW: number): string {
+  let s = String(text ?? "");
+  while (s.length > 2 && font.widthOfTextAtSize(s, size) > maxW) s = s.slice(0, -2) + "…";
+  return s;
+}
+
+function fmtEur(v: any): string {
+  const n = parseFloat(String(v ?? ""));
+  return isNaN(n) ? "—" : `€ ${n.toFixed(2)}`;
+}
+
+function fmtDate(iso: string): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
 export async function POST(request: NextRequest) {
@@ -19,199 +46,345 @@ export async function POST(request: NextRequest) {
     const { lieferung } = await request.json();
     if (!lieferung) return NextResponse.json({ error: "Keine Lieferungsdaten" }, { status: 400 });
 
-    const pdfDoc = await PDFDocument.create();
-    const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const doc = await PDFDocument.create();
+    const R  = await doc.embedFont(StandardFonts.Helvetica);
+    const B  = await doc.embedFont(StandardFonts.HelveticaBold);
 
-    const W = 595, H = 842;
-    const marginLeft = 48, marginRight = 48;
-    const contentWidth = W - marginLeft - marginRight;
+    let page = doc.addPage([W, H]);
+    let y = H;
 
-    let page = pdfDoc.addPage([W, H]);
-    let y = H - 48;
-
-    const addPage = () => {
-      page = pdfDoc.addPage([W, H]);
+    // ── Seiten-Management ────────────────────────────────────────────────────
+    const newPage = () => {
+      page = doc.addPage([W, H]);
       y = H - 48;
+      // dezente Kopfzeile auf Folgeseiten
+      page.drawRectangle({ x: 0, y: H - 28, width: W, height: 28, color: C.navy });
+      page.drawText("LieferCheck Pro  ·  Lieferbericht", { x: ML, y: H - 18, size: 8, font: R, color: rgb(0.6, 0.65, 0.75) });
+      const pageNum = doc.getPageCount();
+      page.drawText(`Seite ${pageNum}`, { x: W - MR, y: H - 18, size: 8, font: R, color: rgb(0.6, 0.65, 0.75) });
+      y = H - 44;
     };
 
-    const checkY = (needed: number) => {
-      if (y < needed + 48) addPage();
-    };
+    const need = (h: number) => { if (y < h + 60) newPage(); };
 
-    const text = (str: string, x: number, yPos: number, opts: {
-      font?: typeof fontBold; size?: number; color?: typeof BLUE; align?: "left" | "right" | "center"; maxWidth?: number;
+    // ── Text-Helfer ──────────────────────────────────────────────────────────
+    const txt = (s: string, x: number, yy: number, opts: {
+      font?: any; size?: number; color?: any; align?: "l"|"r"|"c"; maxW?: number;
     } = {}) => {
-      const { font = fontRegular, size = 10, color = DARK, align = "left", maxWidth } = opts;
-      let s = str;
-      if (maxWidth) {
-        while (font.widthOfTextAtSize(s, size) > maxWidth && s.length > 3) s = s.slice(0, -2) + "…";
-      }
-      const tw = font.widthOfTextAtSize(s, size);
-      let drawX = x;
-      if (align === "right") drawX = x - tw;
-      if (align === "center") drawX = x - tw / 2;
-      page.drawText(s, { x: drawX, y: yPos, size, font, color });
+      const { font = R, size = 9.5, color = C.black, align = "l", maxW } = opts;
+      let str = maxW ? clamp(s, font, size, maxW) : String(s ?? "");
+      const tw = font.widthOfTextAtSize(str, size);
+      const dx = align === "r" ? -tw : align === "c" ? -tw / 2 : 0;
+      page.drawText(str, { x: x + dx, y: yy, size, font, color });
     };
 
-    const hrLine = (yPos: number, col = LIGHT_GREY) => {
-      page.drawLine({ start: { x: marginLeft, y: yPos }, end: { x: W - marginRight, y: yPos }, thickness: 0.5, color: col });
-    };
+    const line = (x1: number, yy: number, x2: number, col = C.greyLight, thick = 0.5) =>
+      page.drawLine({ start: { x: x1, y: yy }, end: { x: x2, y: yy }, thickness: thick, color: col });
 
-    const rect = (x: number, yPos: number, w: number, h: number, color: typeof BLUE) => {
-      page.drawRectangle({ x, y: yPos, width: w, height: h, color });
-    };
+    const box = (x: number, yy: number, w: number, h: number, col: any, radius = 0) =>
+      page.drawRectangle({ x, y: yy, width: w, height: h, color: col, borderRadius: radius });
 
-    // ── HEADER ──
-    rect(0, H - 80, W, 80, DARK);
-    text("LieferCheck Pro", marginLeft, H - 32, { font: fontBold, size: 16, color: WHITE });
-    text("Lieferbericht", marginLeft, H - 50, { size: 10, color: rgb(0.5, 0.55, 0.65) });
+    // ══════════════════════════════════════════════════════════════════════════
+    // SEITE 1 – HEADER
+    // ══════════════════════════════════════════════════════════════════════════
+    box(0, H - 90, W, 90, C.navy);
 
-    const datum = lieferung.erstellt_am || lieferung.created_at;
-    const datumStr = datum ? new Date(datum).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" }) : "-";
-    text(`Datum: ${datumStr}`, W - marginRight, H - 32, { align: "right", size: 10, color: LIGHT_GREY });
-    text(`ID: ${(lieferung.id || "").slice(0, 8).toUpperCase()}`, W - marginRight, H - 48, { align: "right", size: 9, color: rgb(0.5, 0.55, 0.65) });
+    // Logo-Block
+    box(ML, H - 68, 36, 36, C.accent, 6);
+    txt("LC", ML + 8, H - 53, { font: B, size: 14, color: C.white });
 
-    y = H - 100;
+    txt("LieferCheck Pro", ML + 46, H - 46, { font: B, size: 16, color: C.white });
+    txt("LIEFERBERICHT", ML + 46, H - 62, { font: B, size: 8, color: rgb(0.55, 0.62, 0.80), align: "l" });
 
-    // ── STATUS BADGE ──
-    const statusColor = lieferung.status === "abgeschlossen" ? GREEN : ORANGE;
-    rect(marginLeft, y - 4, 90, 20, statusColor);
-    text(lieferung.status === "abgeschlossen" ? "Abgeschlossen" : "Offen", marginLeft + 8, y + 2, { font: fontBold, size: 9, color: WHITE });
+    // Datum + ID rechts
+    const datumStr = fmtDate(lieferung.erstellt_am || lieferung.created_at);
+    txt(datumStr, W - MR, H - 46, { font: B, size: 11, color: C.white, align: "r" });
+    txt(`ID: ${(lieferung.id || "").slice(0, 8).toUpperCase()}`, W - MR, H - 61, { size: 8, color: rgb(0.55, 0.62, 0.80), align: "r" });
+
+    y = H - 106;
+
+    // ── Status-Banner ────────────────────────────────────────────────────────
+    const isAbgeschlossen = lieferung.status === "abgeschlossen";
+    const bannerCol  = isAbgeschlossen ? C.greenBg  : C.orangeBg;
+    const bannerTxt  = isAbgeschlossen ? C.green    : C.orange;
+    const bannerLabel = isAbgeschlossen ? "✓  Freigegeben" : "●  Offen";
+
+    box(ML, y - 6, 130, 22, bannerCol, 4);
+    txt(bannerLabel, ML + 10, y + 3, { font: B, size: 9, color: bannerTxt });
+
+    // Ersparnis rechts
     if (lieferung.ersparnis_eur > 0) {
-      text(`Ersparnis erkannt: €${parseFloat(lieferung.ersparnis_eur).toFixed(2)}`, W - marginRight, y + 2, { align: "right", size: 10, color: BLUE, font: fontBold });
+      const espStr = `Erkannte Ersparnis: ${fmtEur(lieferung.ersparnis_eur)}`;
+      const espW = B.widthOfTextAtSize(espStr, 10) + 20;
+      box(W - MR - espW, y - 6, espW, 22, C.accentBg, 4);
+      txt(espStr, W - MR - 10, y + 3, { font: B, size: 10, color: C.accent, align: "r" });
     }
-    y -= 28;
-    hrLine(y);
-    y -= 20;
 
-    // ── SECTION HELPER ──
-    const sectionTitle = (title: string) => {
-      checkY(50);
-      rect(marginLeft, y - 4, contentWidth, 22, rgb(0.08, 0.1, 0.14));
-      text(title, marginLeft + 8, y + 4, { font: fontBold, size: 10, color: WHITE });
+    y -= 30;
+    line(ML, y, W - MR, C.greyLight, 1);
+    y -= 18;
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // ÜBERSICHTS-KARTEN (3er-Reihe)
+    // ══════════════════════════════════════════════════════════════════════════
+    const r = lieferung.rechnung_data || {};
+    const abgleich: any[] = lieferung.abgleich_data?.abgleich || [];
+    const abweichungen = abgleich.filter((a: any) => a.status !== "ok");
+    const preisAbw: any[] = r.preisabweichungen || [];
+
+    const cards = [
+      { label: "Lieferant",    val: r.lieferant || "—" },
+      { label: "Rechnungs-Nr.",val: r.rechnungs_nummer || "—" },
+      { label: "Rechnungsdatum",val: r.datum || "—" },
+    ];
+
+    const cw3 = (CW - 16) / 3;
+    cards.forEach((c, i) => {
+      const cx = ML + i * (cw3 + 8);
+      box(cx, y - 38, cw3, 48, C.greyBg, 4);
+      txt(c.label, cx + 10, y - 5, { size: 8, color: C.grey });
+      txt(c.val, cx + 10, y - 22, { font: B, size: 9.5, color: C.dark, maxW: cw3 - 16 });
+    });
+    y -= 54;
+
+    // ── Betragszeile ─────────────────────────────────────────────────────────
+    const betraege = [
+      { label: "Netto",  val: fmtEur(r.netto) },
+      { label: "MwSt",   val: fmtEur(r.mwst) },
+      { label: "Brutto", val: fmtEur(r.brutto), bold: true },
+    ];
+    const bw = (CW - 16) / 3;
+    betraege.forEach((b, i) => {
+      const cx = ML + i * (bw + 8);
+      const bgCol = i === 2 ? C.accentBg : C.greyBg;
+      const fc    = i === 2 ? C.accent   : C.dark;
+      box(cx, y - 30, bw, 38, bgCol, 4);
+      txt(b.label, cx + 10, y - 6, { size: 7.5, color: C.grey });
+      txt(b.val, cx + bw - 10, y - 22, { font: b.bold ? B : R, size: 12, color: fc, align: "r" });
+    });
+    y -= 46;
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // SECTION-HELPER
+    // ══════════════════════════════════════════════════════════════════════════
+    const section = (title: string) => {
+      need(60);
+      y -= 10;
+      box(ML, y - 4, CW, 22, C.navy, 4);
+      txt(title.toUpperCase(), ML + 12, y + 4, { font: B, size: 8, color: rgb(0.7, 0.78, 0.95) });
       y -= 30;
     };
 
-    const kv = (label: string, value: string, col2 = false) => {
-      checkY(18);
-      const x = col2 ? marginLeft + contentWidth / 2 : marginLeft;
-      text(label, x, y, { size: 9, color: GREY });
-      text(value || "—", x, y - 12, { font: fontBold, size: 10, color: DARK, maxWidth: contentWidth / 2 - 10 });
-      if (!col2) y -= 28;
+    const tableHeader = (cols: { label: string; x: number; align?: "l"|"r" }[]) => {
+      cols.forEach(c => txt(c.label, c.x, y, { font: B, size: 8, color: C.grey, align: c.align || "l" }));
+      y -= 12;
+      line(ML, y, W - MR, C.greyLight);
+      y -= 10;
     };
 
-    // ── RECHNUNGSDATEN ──
-    if (lieferung.rechnung_data) {
-      const r = lieferung.rechnung_data;
-      sectionTitle("Rechnungsdaten");
-      kv("Lieferant", r.lieferant || "—");
-      kv("Rechnungsnummer", r.rechnungs_nummer || "—");
-      kv("Datum", r.datum || "—");
-      kv("Netto", r.netto != null ? `€${parseFloat(r.netto).toFixed(2)}` : "—");
-      kv("MwSt", r.mwst != null ? `€${parseFloat(r.mwst).toFixed(2)}` : "—");
-      kv("Brutto", r.brutto != null ? `€${parseFloat(r.brutto).toFixed(2)}` : "—", false);
-      y -= 8;
-    }
+    const tableRow = (cols: { val: string; x: number; align?: "l"|"r"; color?: any; bold?: boolean; maxW?: number }[], shade: boolean) => {
+      need(20);
+      if (shade) box(ML, y - 4, CW, 17, C.greyBg, 2);
+      cols.forEach(c => txt(c.val, c.x, y, { font: c.bold ? B : R, size: 9, color: c.color || C.dark, align: c.align || "l", maxW: c.maxW }));
+      y -= 17;
+    };
 
-    // ── POSITIONEN ──
-    if (lieferung.rechnung_data?.positionen?.length > 0) {
-      sectionTitle("Rechnungspositionen");
-      const cols = [marginLeft, marginLeft + contentWidth * 0.5, marginLeft + contentWidth * 0.7, marginLeft + contentWidth * 0.85];
-      const headers = ["Artikel", "Menge", "Einzelpreis", "Gesamt"];
-      headers.forEach((h, i) => text(h, cols[i], y, { size: 9, color: GREY, font: fontBold }));
+    // ══════════════════════════════════════════════════════════════════════════
+    // RECHNUNGSPOSITIONEN
+    // ══════════════════════════════════════════════════════════════════════════
+    const positionen: any[] = r.positionen || [];
+    if (positionen.length > 0) {
+      section("Rechnungspositionen");
+      const c0 = ML + 8, c1 = ML + CW * 0.52, c2 = ML + CW * 0.67, c3 = W - MR - 8;
+      tableHeader([
+        { label: "Artikel", x: c0 },
+        { label: "Menge",   x: c1 },
+        { label: "Einzelpr.", x: c2 },
+        { label: "Gesamt",  x: c3, align: "r" },
+      ]);
+      positionen.forEach((p: any, i: number) => {
+        need(20);
+        tableRow([
+          { val: p.artikel || "—", x: c0, maxW: CW * 0.49 },
+          { val: String(p.menge ?? "—"), x: c1 },
+          { val: p.einzelpreis != null ? fmtEur(p.einzelpreis) : "—", x: c2 },
+          { val: p.gesamtpreis != null ? fmtEur(p.gesamtpreis) : "—", x: c3, align: "r" },
+        ], i % 2 === 0);
+      });
+
+      // Summenzeile
+      need(28);
+      y -= 4;
+      line(ML, y, W - MR, C.dark, 1);
       y -= 14;
-      hrLine(y);
-      y -= 10;
-
-      for (const pos of lieferung.rechnung_data.positionen) {
-        checkY(18);
-        text(clamp(pos.artikel || "", 45), cols[0], y, { size: 9, maxWidth: contentWidth * 0.48 });
-        text(String(pos.menge ?? "—"), cols[1], y, { size: 9 });
-        text(pos.einzelpreis != null ? `€${parseFloat(pos.einzelpreis).toFixed(2)}` : "—", cols[2], y, { size: 9 });
-        text(pos.gesamtpreis != null ? `€${parseFloat(pos.gesamtpreis).toFixed(2)}` : "—", cols[3], y, { size: 9 });
-        y -= 16;
-      }
-      y -= 8;
-    }
-
-    // ── ABGLEICH ──
-    if (lieferung.abgleich_data?.abgleich?.length > 0) {
-      sectionTitle("Bestell-Lieferabgleich");
-      const abweichungen = lieferung.abgleich_data.abgleich.filter((a: any) => a.status !== "ok");
-      const ok = lieferung.abgleich_data.abgleich.filter((a: any) => a.status === "ok");
-
-      if (abweichungen.length === 0) {
-        checkY(20);
-        text("✓ Alle Positionen korrekt geliefert – keine Abweichungen", marginLeft, y, { size: 10, color: GREEN, font: fontBold });
-        y -= 20;
-      } else {
-        checkY(18);
-        text(`${ok.length} OK  ·  ${abweichungen.length} Abweichung(en)`, marginLeft, y, { size: 9, color: GREY });
-        y -= 20;
-        const cols = [marginLeft, marginLeft + contentWidth * 0.45, marginLeft + contentWidth * 0.6, marginLeft + contentWidth * 0.75];
-        ["Artikel", "Bestellt", "Geliefert", "Abweichung"].forEach((h, i) => text(h, cols[i], y, { size: 9, color: GREY, font: fontBold }));
-        y -= 14;
-        hrLine(y);
-        y -= 10;
-        for (const item of abweichungen) {
-          checkY(18);
-          text(clamp(item.artikel || "", 40), cols[0], y, { size: 9, maxWidth: contentWidth * 0.43 });
-          text(String(item.bestellt ?? "—"), cols[1], y, { size: 9 });
-          text(String(item.geliefert ?? "—"), cols[2], y, { size: 9 });
-          const diff = item.abweichung ?? 0;
-          text((diff > 0 ? "+" : "") + diff, cols[3], y, { size: 9, color: diff < 0 ? RED : ORANGE, font: fontBold });
-          y -= 16;
-        }
-      }
-      y -= 8;
-    }
-
-    // ── PREISABWEICHUNGEN ──
-    if (lieferung.rechnung_data?.preisabweichungen?.length > 0) {
-      sectionTitle("Preisabweichungen zur Preisliste");
-      const cols = [marginLeft, marginLeft + contentWidth * 0.45, marginLeft + contentWidth * 0.62, marginLeft + contentWidth * 0.79];
-      ["Artikel", "Rechnung", "Preisliste", "Differenz"].forEach((h, i) => text(h, cols[i], y, { size: 9, color: GREY, font: fontBold }));
-      y -= 14;
-      hrLine(y);
-      y -= 10;
-      for (const a of lieferung.rechnung_data.preisabweichungen) {
-        checkY(18);
-        text(clamp(a.artikel || "", 40), cols[0], y, { size: 9, maxWidth: contentWidth * 0.43 });
-        text(`€${parseFloat(a.preis_rechnung).toFixed(2)}`, cols[1], y, { size: 9 });
-        text(`€${parseFloat(a.preis_liste).toFixed(2)}`, cols[2], y, { size: 9 });
-        const diff = parseFloat(a.abweichung_eur);
-        text(`${diff > 0 ? "+" : ""}€${diff.toFixed(2)} (${a.abweichung_prozent}%)`, cols[3], y, { size: 9, color: diff > 0 ? RED : GREEN, font: fontBold });
-        y -= 16;
-      }
-      y -= 8;
-    }
-
-    // ── NOTIZ ──
-    if (lieferung.notiz) {
-      sectionTitle("Notiz");
-      checkY(30);
-      text(clamp(lieferung.notiz, 120), marginLeft, y, { size: 9, color: DARK, maxWidth: contentWidth });
+      txt("Rechnungsbetrag (Brutto)", ML + 8, y, { font: B, size: 9.5, color: C.dark });
+      txt(fmtEur(r.brutto), W - MR - 8, y, { font: B, size: 11, color: C.accent, align: "r" });
       y -= 20;
     }
 
-    // ── FOOTER ──
-    const pages = pdfDoc.getPages();
+    // ══════════════════════════════════════════════════════════════════════════
+    // BESTELL-LIEFERABGLEICH
+    // ══════════════════════════════════════════════════════════════════════════
+    if (abgleich.length > 0) {
+      section("Bestell-Lieferabgleich");
+
+      // Kurzinfo
+      const okCount = abgleich.length - abweichungen.length;
+      need(20);
+      box(ML, y - 4, 80, 18, C.greenBg, 4);
+      txt(`✓  ${okCount} korrekt`, ML + 8, y + 1, { font: B, size: 8.5, color: C.green });
+      if (abweichungen.length > 0) {
+        box(ML + 88, y - 4, 100, 18, C.orangeBg, 4);
+        txt(`⚠  ${abweichungen.length} Abweichung(en)`, ML + 96, y + 1, { font: B, size: 8.5, color: C.orange });
+      }
+      y -= 28;
+
+      const c0 = ML + 8, c1 = ML + CW * 0.52, c2 = ML + CW * 0.66, c3 = W - MR - 8;
+      tableHeader([
+        { label: "Artikel",    x: c0 },
+        { label: "Bestellt",   x: c1 },
+        { label: "Geliefert",  x: c2 },
+        { label: "Abweichung", x: c3, align: "r" },
+      ]);
+
+      abgleich.forEach((item: any, i: number) => {
+        need(20);
+        const isOk   = item.status === "ok";
+        const diff   = item.abweichung ?? 0;
+        const diffCol = isOk ? C.green : diff < 0 ? C.red : C.orange;
+        const diffStr = isOk ? "—" : (diff > 0 ? "+" : "") + diff;
+        tableRow([
+          { val: item.artikel || "—", x: c0, maxW: CW * 0.49 },
+          { val: String(item.bestellt  ?? "—"), x: c1 },
+          { val: String(item.geliefert ?? "—"), x: c2 },
+          { val: diffStr, x: c3, align: "r", color: diffCol, bold: !isOk },
+        ], i % 2 === 0);
+      });
+      y -= 6;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // PREISABWEICHUNGEN
+    // ══════════════════════════════════════════════════════════════════════════
+    if (preisAbw.length > 0) {
+      section(`Preisabweichungen zur Preisliste (${preisAbw.length})`);
+      const c0 = ML + 8, c1 = ML + CW * 0.46, c2 = ML + CW * 0.62, c3 = W - MR - 8;
+      tableHeader([
+        { label: "Artikel",    x: c0 },
+        { label: "Rechnung",   x: c1 },
+        { label: "Preisliste", x: c2 },
+        { label: "Differenz",  x: c3, align: "r" },
+      ]);
+      preisAbw.forEach((a: any, i: number) => {
+        need(20);
+        const diff = parseFloat(a.abweichung_eur ?? 0);
+        tableRow([
+          { val: a.artikel || "—", x: c0, maxW: CW * 0.44 },
+          { val: fmtEur(a.preis_rechnung), x: c1 },
+          { val: fmtEur(a.preis_liste),    x: c2 },
+          { val: `${diff > 0 ? "+" : ""}${fmtEur(diff)} (${a.abweichung_prozent}%)`, x: c3, align: "r", color: diff > 0 ? C.red : C.green, bold: true },
+        ], i % 2 === 0);
+      });
+
+      // Summe Preisabweichungen
+      const gesamtDiff = preisAbw.reduce((s: number, a: any) => s + parseFloat(a.abweichung_eur ?? 0), 0);
+      if (Math.abs(gesamtDiff) > 0.01) {
+        need(28);
+        y -= 4;
+        line(ML, y, W - MR, C.dark, 1);
+        y -= 14;
+        txt("Gesamte Preisabweichung", ML + 8, y, { font: B, size: 9.5, color: C.dark });
+        txt(`${gesamtDiff > 0 ? "+" : ""}${fmtEur(gesamtDiff)}`, W - MR - 8, y, { font: B, size: 11, color: gesamtDiff > 0 ? C.red : C.green, align: "r" });
+        y -= 20;
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // PFAND-SALDO
+    // ══════════════════════════════════════════════════════════════════════════
+    const pfand: any[] = lieferung.pfand_items?.artikel || [];
+    const pfandEintrage: any[] = lieferung.lieferschein_data?.pfand_eintrage || [];
+    if (pfand.length > 0) {
+      section("Pfand-Saldo");
+      const c0 = ML + 8, c1 = ML + CW * 0.50, c2 = ML + CW * 0.68, c3 = W - MR - 8;
+      tableHeader([
+        { label: "Artikel",    x: c0 },
+        { label: "Mitgegeben", x: c1 },
+        { label: "Laut Fahrer",x: c2 },
+        { label: "Differenz",  x: c3, align: "r" },
+      ]);
+      pfand.forEach((p: any, i: number) => {
+        const fahrer = pfandEintrage.find((f: any) => f.artikel?.toLowerCase() === p.name?.toLowerCase());
+        const diff = fahrer ? p.menge - fahrer.menge : p.menge;
+        tableRow([
+          { val: p.name || "—", x: c0, maxW: CW * 0.48 },
+          { val: String(p.menge), x: c1 },
+          { val: fahrer ? String(fahrer.menge) : "—", x: c2 },
+          { val: diff === 0 ? "0" : (diff > 0 ? "+" : "") + diff, x: c3, align: "r", color: diff !== 0 ? C.red : C.green, bold: diff !== 0 },
+        ], i % 2 === 0);
+      });
+      y -= 6;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // NOTIZ
+    // ══════════════════════════════════════════════════════════════════════════
+    if (lieferung.notiz?.trim()) {
+      section("Notiz");
+      need(40);
+      box(ML, y - 8, CW, 30, C.greyBg, 4);
+      txt(clamp(lieferung.notiz.trim(), R, 9.5, CW - 24), ML + 12, y, { size: 9.5, color: C.dark });
+      y -= 44;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // FREIGABE-ZEILE
+    // ══════════════════════════════════════════════════════════════════════════
+    need(70);
+    y -= 14;
+    line(ML, y, W - MR, C.greyLight, 1);
+    y -= 20;
+    section("Freigabe & Unterschrift");
+
+    const sigBoxW = (CW - 16) / 2;
+    [0, 1].forEach(i => {
+      const sx = ML + i * (sigBoxW + 16);
+      box(sx, y - 32, sigBoxW, 40, C.greyBg, 4);
+      const label = i === 0 ? "Geprüft von" : "Datum / Uhrzeit";
+      const value = i === 0
+        ? (isAbgeschlossen ? "Freigegeben" : "_____________________")
+        : (isAbgeschlossen ? `${fmtDate(lieferung.freigabe_am || lieferung.erstellt_am)}` : "_____________");
+      txt(label, sx + 10, y - 6, { size: 7.5, color: C.grey });
+      txt(value,  sx + 10, y - 22, { font: B, size: 9.5, color: C.dark });
+    });
+    y -= 50;
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // FOOTER auf allen Seiten
+    // ══════════════════════════════════════════════════════════════════════════
+    const pages = doc.getPages();
+    const total = pages.length;
     pages.forEach((p, i) => {
-      p.drawText(`LieferCheck Pro · Generiert am ${new Date().toLocaleDateString("de-DE")} · Seite ${i + 1}/${pages.length}`, {
-        x: marginLeft, y: 24, size: 8, font: fontRegular, color: GREY,
+      p.drawRectangle({ x: 0, y: 0, width: W, height: 28, color: C.navy });
+      p.drawText(
+        `LieferCheck Pro  ·  Lieferbericht  ·  Generiert am ${new Date().toLocaleDateString("de-DE")}`,
+        { x: ML, y: 10, size: 7.5, font: R, color: rgb(0.5, 0.56, 0.70) }
+      );
+      p.drawText(`Seite ${i + 1} / ${total}`, {
+        x: W - MR, y: 10, size: 7.5, font: R,
+        color: rgb(0.5, 0.56, 0.70),
       });
     });
 
-    const pdfBytes = await pdfDoc.save();
+    const pdfBytes = await doc.save();
     return new NextResponse(Buffer.from(pdfBytes), {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="lieferbericht-${(lieferung.id || "").slice(0, 8)}.pdf"`,
       },
     });
-  } catch (error) {
-    console.error("[PDF-Export] Fehler:", error);
+  } catch (err) {
+    console.error("[PDF-Export] Fehler:", err);
     return NextResponse.json({ error: "PDF-Generierung fehlgeschlagen" }, { status: 500 });
   }
 }
