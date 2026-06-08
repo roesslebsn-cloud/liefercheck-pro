@@ -68,12 +68,12 @@ const pricing = [
     note: "Kostenloser Ersttermin · Jederzeit kündbar",
     features: [
       "5 Lieferungen/Monat",
-      "1 Nutzer · 2 Standorte · 3 Mitarbeiter",
+      "1 Nutzer · 1 Standort · 1 Mitarbeiter",
       "KI-Lieferscheinanalyse",
       "PDF-Export",
       "Personalisierte Einrichtung Ihrer Unternehmensstruktur",
     ],
-    cta: "Kostenlos testen",
+    cta: "Kontakt aufnehmen",
     highlight: false,
   },
   {
@@ -81,7 +81,7 @@ const pricing = [
     price: "60€",
     period: "/Monat",
     desc: "Für aktive Betriebe",
-    note: "14 Tage gratis · Dann 60 €/Monat · Kein Risiko",
+    note: "14 Tage gratis testen · Kein Risiko",
     features: [
       "15 Lieferungen/Monat",
       "3 Nutzer · 2 Standorte · 3 Mitarbeiter/Standort",
@@ -91,7 +91,7 @@ const pricing = [
       "E-Mail-Rechnungseingang",
       "Personalisierte Einrichtung Ihrer Unternehmensstruktur",
     ],
-    cta: "14 Tage kostenlos testen",
+    cta: "Kontakt aufnehmen",
     highlight: true,
   },
   {
@@ -103,10 +103,10 @@ const pricing = [
     features: [
       "Unbegrenzte Lieferungen",
       "Unbegrenzte Nutzer & Standorte",
-      "DATEV-Export",
-      "API-Zugang (Anbindung an ERP & Warenwirtschaft)",
-      "Audit-Trail (GoBD-konforme Protokollierung aller Freigaben)",
-      "Priority-Support",
+      "DATEV-Export (SKR03, sofort buchbar)",
+      "Audit-Trail (GoBD-konform, manipulationssicher)",
+      "Reklamations-E-Mail automatisch an Lieferant",
+      "Priority-Support (persönlicher Ansprechpartner)",
       "Personalisierte Einrichtung Ihrer Unternehmensstruktur",
     ],
     cta: "Kontakt aufnehmen",

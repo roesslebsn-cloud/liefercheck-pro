@@ -85,28 +85,32 @@ function FreigabePageContent() {
         freigabe_am: new Date().toISOString()
       });
 
-      const { data: { user } } = await supabase.auth.getUser();
-      const anzahlAbweichungen = abgleichData?.abgleich?.filter((i: any) => i.status !== "ok").length || 0;
-      const anzahlPreisabweichungen = rechnungData?.preisabweichungen?.length || 0;
-      const rechnungsQuelle = rechnungData?.xrechnung ? (rechnungData.format || "ZUGFeRD") : "KI-Analyse";
-
-      await supabase.from("audit_log").insert({
-        user_id: user?.id,
-        user_email: user?.email,
-        aktion: "freigabe",
-        entity_type: "lieferung",
-        entity_id: lieferungId,
-        details: {
-          ersparnis_eur: ersparnis,
-          notiz: notiz,
-          anzahl_abweichungen: anzahlAbweichungen,
-          anzahl_preisabweichungen: anzahlPreisabweichungen,
-          rechnung_quelle: rechnungsQuelle,
-          rechnungs_nummer: rechnungData?.rechnungs_nummer || null,
-          lieferant: rechnungData?.lieferant || null,
-          freigabe_zeitpunkt: new Date().toISOString(),
-        }
-      });
+      // Audit-Log – non-blocking (Tabelle existiert ggf. noch nicht)
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        const anzahlAbweichungen = abgleichData?.abgleich?.filter((i: any) => i.status !== "ok").length || 0;
+        const anzahlPreisabweichungen = rechnungData?.preisabweichungen?.length || 0;
+        const rechnungsQuelle = rechnungData?.xrechnung ? (rechnungData.format || "ZUGFeRD") : "KI-Analyse";
+        await supabase.from("audit_log").insert({
+          user_id: user?.id,
+          user_email: user?.email,
+          aktion: "freigabe",
+          entity_type: "lieferung",
+          entity_id: lieferungId,
+          details: {
+            ersparnis_eur: ersparnis,
+            notiz: notiz,
+            anzahl_abweichungen: anzahlAbweichungen,
+            anzahl_preisabweichungen: anzahlPreisabweichungen,
+            rechnung_quelle: rechnungsQuelle,
+            rechnungs_nummer: rechnungData?.rechnungs_nummer || null,
+            lieferant: rechnungData?.lieferant || null,
+            freigabe_zeitpunkt: new Date().toISOString(),
+          }
+        });
+      } catch (auditErr) {
+        console.warn("[Freigabe] Audit-Log fehlgeschlagen (Migration ausstehend?):", auditErr);
+      }
 
       router.push("/dashboard");
     } catch (error) {
@@ -410,7 +414,7 @@ function FreigabePageContent() {
                       </svg>
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-white">Pfandfotos</p>
+                      <p className="text-sm font-medium text-white">Pfandliste & Fotos</p>
                       <p className="text-xs text-muted">Schritt 1</p>
                     </div>
                   </div>
