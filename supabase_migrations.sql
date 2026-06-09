@@ -442,3 +442,27 @@ DROP POLICY IF EXISTS "Admins aendern Interessenten" ON public.interessenten;
 CREATE POLICY "Admins aendern Interessenten"
   ON public.interessenten FOR UPDATE
   USING (auth.role() = 'authenticated');
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- MIGRATION 10: Food-Workflow (Lieferungen ohne Pfand)
+-- Was:
+--  * lieferungen.typ          : 'getraenke' (mit Pfand) | 'food' (ohne Pfand)
+--  * lieferungen.wareneingang : JSONB { temperatur_c, kuehlkette_ok, erfasst_am } (HACCP)
+--  * lieferanten.kategorie    : 'getraenke' | 'food' | 'beides' (Filter im Anlege-Workflow)
+-- Hinweis: Bestandsdaten bleiben 'getraenke' (Default) -> bisheriges Verhalten unveraendert.
+-- Idempotent (mehrfach ausfuehrbar).
+-- ═══════════════════════════════════════════════════════════════════════════
+
+ALTER TABLE public.lieferungen
+  ADD COLUMN IF NOT EXISTS typ          TEXT NOT NULL DEFAULT 'getraenke',  -- 'getraenke' | 'food'
+  ADD COLUMN IF NOT EXISTS wareneingang JSONB;                             -- { temperatur_c, kuehlkette_ok, erfasst_am }
+
+ALTER TABLE public.lieferanten
+  ADD COLUMN IF NOT EXISTS kategorie TEXT NOT NULL DEFAULT 'getraenke';    -- 'getraenke' | 'food' | 'beides'
+
+CREATE INDEX IF NOT EXISTS idx_lieferungen_typ ON public.lieferungen(typ);
+
+-- Pruefe danach im Table Editor:
+--   - 'lieferungen' hat die Spalten typ (default 'getraenke') und wareneingang (jsonb)
+--   - 'lieferanten' hat die Spalte kategorie (default 'getraenke')

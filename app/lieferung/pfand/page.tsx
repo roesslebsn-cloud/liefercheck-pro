@@ -131,7 +131,7 @@ function PfandPageContent() {
           </div>
         </header>
 
-        <ProgressBar currentStep={1} lieferungId={lieferungId} lieferdatum={lieferdatum} />
+        <ProgressBar current="pfand" typ="getraenke" lieferungId={lieferungId} lieferdatum={lieferdatum} />
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 sm:py-12">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-accent-muted/50 px-3 py-1 text-xs font-medium text-accent ring-1 ring-accent/20">

@@ -6,10 +6,21 @@ import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
-import { LieferscheinAnalysis, PfandAnalysis } from "../../../lib/types";
+import { LieferscheinAnalysis, PfandAnalysis, LieferungTyp, Wareneingang } from "../../../lib/types";
 import { updateLieferung, getLieferungById } from "../../../lib/database";
 import { optimizeImageFile, pdfToImages } from "../../../lib/imageUtils";
+import { mhdStatus, MHD_TONE_CLASS } from "../../../lib/food";
 // pdfjs loaded dynamically to avoid SSR DOMMatrix error
+
+// Farbiges MHD-Badge (grün = ok, orange = bald, rot = kritisch/abgelaufen)
+function MhdBadge({ mhd }: { mhd: string }) {
+  const s = mhdStatus(mhd);
+  return (
+    <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11.5px] font-medium ${MHD_TONE_CLASS[s.tone]}`}>
+      {s.label}
+    </span>
+  );
+}
 
 function LieferscheinPageContent() {
   const router = useRouter();
@@ -31,6 +42,11 @@ function LieferscheinPageContent() {
   const [pfandData, setPfandData] = useState<PfandAnalysis | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [typ, setTyp] = useState<LieferungTyp>("getraenke");
+  const isFood = typ === "food";
+  // Wareneingang / Kühlkette (HACCP) – nur Food
+  const [wareneingang, setWareneingang] = useState<Wareneingang>({ temperatur_c: null, kuehlkette_ok: null });
+  const [waSaved, setWaSaved] = useState(false);
 
   const pagesKey = lieferungId ? `ls_pages_${lieferungId}` : null;
   const persistPages = (list: { name: string; dataUrl: string }[]) => {
@@ -55,6 +71,8 @@ function LieferscheinPageContent() {
   useEffect(() => {
     if (lieferungId) {
       getLieferungById(lieferungId).then((lieferung) => {
+        if (lieferung?.typ) setTyp(lieferung.typ);
+        if (lieferung?.wareneingang) setWareneingang(lieferung.wareneingang);
         if (lieferung?.pfand_items) setPfandData(lieferung.pfand_items);
         if (lieferung?.lieferschein_data) {
           setResults(lieferung.lieferschein_data);
@@ -161,7 +179,7 @@ const handleAnalyze = async () => {
     const response = await fetch("/api/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "lieferschein", images }),
+      body: JSON.stringify({ type: "lieferschein", images, warenart: typ }),
     });
 
     const data = await response.json();
@@ -264,7 +282,7 @@ const setDecision = (id: string, patch: Partial<{ delivered: boolean; menge: num
 };
 
 // ─── Manuelle Korrektur der erkannten Artikel (KI-Fehler ausbügeln) ──────────
-const updateGeliefertItem = (index: number, patch: Partial<{ artikel: string; menge: number; groesse: string }>) => {
+const updateGeliefertItem = (index: number, patch: Partial<{ artikel: string; menge: number; groesse: string; mhd: string; charge: string; basiseinheit: "stueck" | "kg" }>) => {
   setResults((prev) => {
     if (!prev) return prev;
     const list = [...(prev.gelieferte_artikel || [])];
@@ -312,6 +330,21 @@ const saveTable = async () => {
     setSavingTable(false);
   }
 };
+
+  // Wareneingang / Kühlkette (HACCP) speichern – Food
+  const patchWareneingang = async (patch: Partial<Wareneingang>) => {
+    const next: Wareneingang = { ...wareneingang, ...patch, erfasst_am: new Date().toISOString() };
+    setWareneingang(next);
+    setWaSaved(false);
+    if (lieferungId) {
+      try {
+        await updateLieferung(lieferungId, { wareneingang: next });
+        setWaSaved(true);
+      } catch {
+        setError("Wareneingang konnte nicht gespeichert werden.");
+      }
+    }
+  };
 
   const comparePfand = (lieferscheinPfand: any[]) => {
     return lieferscheinPfand.map((item) => {
@@ -361,20 +394,79 @@ const saveTable = async () => {
           </div>
         </header>
 
-        <ProgressBar currentStep={2} lieferungId={lieferungId} lieferdatum={lieferdatum} />
+        <ProgressBar current="lieferschein" typ={typ} lieferungId={lieferungId} lieferdatum={lieferdatum} />
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-12">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-accent-muted/50 px-3 py-1 text-xs font-medium text-accent ring-1 ring-accent/20">
             <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-            Schritt 2 von 5
+            {isFood ? "Schritt 1 von 4" : "Schritt 2 von 5"}
           </div>
 
           <h1 className="mt-4 text-3xl font-bold tracking-tight text-white">
             Lieferschein fotografieren
           </h1>
           <p className="mt-3 max-w-xl text-muted">
-            Fotografieren Sie alle Seiten des Lieferscheins – auch mehrseitige (z.&nbsp;B. „Seite 1 von 4"). Handschriftliche Bleistift-Notizen und „fehlt"-Vermerke werden mitgelesen.
+            Fotografieren Sie alle Seiten des Lieferscheins – auch mehrseitige (z.&nbsp;B. „Seite 1 von 4"). Handschriftliche Bleistift-Notizen und „fehlt"-Vermerke werden mitgelesen.{isFood ? " Bei Lebensmitteln werden MHD und Chargennummern – falls aufgedruckt – automatisch miterfasst." : ""}
           </p>
+
+          {/* Wareneingang / Kühlkette (HACCP) – nur Food */}
+          {isFood && (
+            <div className="mt-6 rounded-xl border border-blue-500/30 bg-blue-500/10 p-5">
+              <div className="flex items-center gap-2">
+                <svg className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 0 1-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 0 1 4.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0 1 12 15a9.065 9.065 0 0 0-6.23-.693L5 14.5m14.8.8 1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0 1 12 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
+                </svg>
+                <h3 className="text-base font-semibold text-white">Wareneingang & Kühlkette (HACCP)</h3>
+                {waSaved && <span className="ml-auto text-xs text-green-400">✓ gespeichert</span>}
+              </div>
+              <p className="mt-1 text-xs text-muted">
+                Kurz dokumentieren – wird beim Freigeben revisionssicher im Audit-Log festgehalten.
+              </p>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="block text-xs font-medium text-muted mb-1">Wareneingangstemperatur (°C)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    inputMode="decimal"
+                    value={wareneingang.temperatur_c ?? ""}
+                    onChange={(e) => setWareneingang((w) => ({ ...w, temperatur_c: e.target.value === "" ? null : Number(e.target.value) }))}
+                    onBlur={(e) => patchWareneingang({ temperatur_c: e.target.value === "" ? null : Number(e.target.value) })}
+                    placeholder="z.B. 4"
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-white placeholder:text-muted focus:border-accent focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted mb-1">Kühlkette eingehalten?</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => patchWareneingang({ kuehlkette_ok: true })}
+                      className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                        wareneingang.kuehlkette_ok === true ? "border-green-500 bg-green-500/20 text-green-300" : "border-border bg-surface text-muted hover:text-white"
+                      }`}
+                    >
+                      Ja ✓
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => patchWareneingang({ kuehlkette_ok: false })}
+                      className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                        wareneingang.kuehlkette_ok === false ? "border-red-500 bg-red-500/20 text-red-300" : "border-border bg-surface text-muted hover:text-white"
+                      }`}
+                    >
+                      Nein ✗
+                    </button>
+                  </div>
+                </div>
+              </div>
+              {wareneingang.kuehlkette_ok === false && (
+                <p className="mt-3 rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2 text-xs text-red-300">
+                  Kühlkette unterbrochen – Ware kritisch prüfen und ggf. reklamieren. Der Vermerk erscheint in der Freigabe und im Audit-Log.
+                </p>
+              )}
+            </div>
+          )}
 
           {error && (
             <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4">
@@ -725,7 +817,10 @@ const saveTable = async () => {
                       <tr className="border-b border-border">
                         <th className="pb-3 text-left font-medium text-muted">Artikel</th>
                         <th className="pb-3 text-left font-medium text-muted w-24">Menge</th>
+                        {isFood && <th className="pb-3 text-left font-medium text-muted w-24">Einheit</th>}
                         <th className="pb-3 text-left font-medium text-muted w-32">Größe</th>
+                        {isFood && <th className="pb-3 text-left font-medium text-muted w-32">MHD</th>}
+                        {isFood && <th className="pb-3 text-left font-medium text-muted w-28">Charge</th>}
                         {editTable && <th className="pb-3 w-10" />}
                       </tr>
                     </thead>
@@ -746,11 +841,24 @@ const saveTable = async () => {
                                 <input
                                   type="number"
                                   min={0}
+                                  step="0.001"
                                   value={item.menge}
                                   onChange={(e) => updateGeliefertItem(index, { menge: Number(e.target.value) })}
                                   className="w-20 rounded-md border border-border bg-surface px-2 py-1.5 text-white focus:border-accent focus:outline-none"
                                 />
                               </td>
+                              {isFood && (
+                                <td className="py-2 pr-2">
+                                  <select
+                                    value={item.basiseinheit || "stueck"}
+                                    onChange={(e) => updateGeliefertItem(index, { basiseinheit: e.target.value as "stueck" | "kg" })}
+                                    className="w-20 rounded-md border border-border bg-surface px-2 py-1.5 text-white focus:border-accent focus:outline-none"
+                                  >
+                                    <option value="stueck">Stück</option>
+                                    <option value="kg">kg</option>
+                                  </select>
+                                </td>
+                              )}
                               <td className="py-2 pr-2">
                                 <input
                                   type="text"
@@ -759,6 +867,27 @@ const saveTable = async () => {
                                   className="w-28 rounded-md border border-border bg-surface px-2 py-1.5 text-white focus:border-accent focus:outline-none"
                                 />
                               </td>
+                              {isFood && (
+                                <td className="py-2 pr-2">
+                                  <input
+                                    type="date"
+                                    value={item.mhd || ""}
+                                    onChange={(e) => updateGeliefertItem(index, { mhd: e.target.value })}
+                                    className="w-32 rounded-md border border-border bg-surface px-2 py-1.5 text-white focus:border-accent focus:outline-none"
+                                  />
+                                </td>
+                              )}
+                              {isFood && (
+                                <td className="py-2 pr-2">
+                                  <input
+                                    type="text"
+                                    value={item.charge || ""}
+                                    onChange={(e) => updateGeliefertItem(index, { charge: e.target.value })}
+                                    placeholder="LOT…"
+                                    className="w-24 rounded-md border border-border bg-surface px-2 py-1.5 text-white placeholder:text-muted focus:border-accent focus:outline-none"
+                                  />
+                                </td>
+                              )}
                               <td className="py-2 text-right">
                                 <button
                                   onClick={() => removeGeliefertItem(index)}
@@ -775,7 +904,12 @@ const saveTable = async () => {
                             <>
                               <td className="py-3 text-white">{item.artikel}</td>
                               <td className="py-3 text-white">{item.menge}</td>
+                              {isFood && <td className="py-3 text-muted">{item.basiseinheit === "kg" ? "kg" : "Stück"}</td>}
                               <td className="py-3 text-white">{item.groesse}</td>
+                              {isFood && (
+                                <td className="py-3">{item.mhd ? <MhdBadge mhd={item.mhd} /> : <span className="text-muted">—</span>}</td>
+                              )}
+                              {isFood && <td className="py-3 text-muted">{item.charge || "—"}</td>}
                             </>
                           )}
                         </tr>
@@ -934,7 +1068,7 @@ const saveTable = async () => {
 
           <div className="mt-8 flex justify-between">
             <a
-              href={buildNextUrl("/lieferung/pfand")}
+              href={buildNextUrl(isFood ? "/lieferung/neu" : "/lieferung/pfand")}
               className="inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-surface-elevated"
             >
               <svg

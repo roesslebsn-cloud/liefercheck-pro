@@ -4,7 +4,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
-import { AbgleichAnalysis, PfandAnalysis, PfandEintrag } from "../../../lib/types";
+import { AbgleichAnalysis, PfandAnalysis, PfandEintrag, LieferungTyp } from "../../../lib/types";
 import { updateLieferung, getLieferungById } from "../../../lib/database";
 import { optimizeImageFile, pdfToImages } from "../../../lib/imageUtils";
 
@@ -29,10 +29,13 @@ function AbgleichPageContent() {
   const [pfandItems, setPfandItems] = useState<PfandAnalysis | null>(null);
   const [fehler, setFehler] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [typ, setTyp] = useState<LieferungTyp>("getraenke");
+  const isFood = typ === "food";
 
   useEffect(() => {
     if (lieferungId) {
       getLieferungById(lieferungId).then((lieferung) => {
+        if (lieferung?.typ) setTyp(lieferung.typ);
         if (lieferung?.lieferschein_data) setLieferscheinData(lieferung.lieferschein_data);
         if (lieferung?.abgleich_data) setResults(lieferung.abgleich_data);
         if (lieferung?.pfand_items) setPfandItems(lieferung.pfand_items);
@@ -226,12 +229,12 @@ function AbgleichPageContent() {
           </div>
         </header>
 
-        <ProgressBar currentStep={3} lieferungId={lieferungId} lieferdatum={lieferdatum} />
+        <ProgressBar current="abgleich" typ={typ} lieferungId={lieferungId} lieferdatum={lieferdatum} />
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-12">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-accent-muted/50 px-3 py-1 text-xs font-medium text-accent ring-1 ring-accent/20">
             <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-            Schritt 3 von 5
+            {isFood ? "Schritt 2 von 4" : "Schritt 3 von 5"}
           </div>
 
           <h1 className="mt-4 text-3xl font-bold tracking-tight text-white">

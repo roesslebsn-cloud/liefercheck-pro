@@ -6,6 +6,8 @@ import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
 import { getLieferungById, updateLieferung, calculateErsparnis } from "../../../lib/database";
 import { supabase } from "../../../lib/supabase";
+import { LieferungTyp, Wareneingang } from "../../../lib/types";
+import { mhdStatus, MHD_TONE_CLASS } from "../../../lib/food";
 
 function FreigabePageContent() {
   const router = useRouter();
@@ -22,6 +24,9 @@ function FreigabePageContent() {
   const [lieferscheinData, setLieferscheinData] = useState<any>(null);
   const [rechnungData, setRechnungData] = useState<any>(null);
   const [pfandItems, setPfandItems] = useState<any>(null);
+  const [typ, setTyp] = useState<LieferungTyp>("getraenke");
+  const [wareneingang, setWareneingang] = useState<Wareneingang | null>(null);
+  const isFood = typ === "food";
   const [correctionsChecked, setCorrectionsChecked] = useState<boolean[]>([]);
 
   // Helper function to normalize artikel names for matching
@@ -44,6 +49,8 @@ function FreigabePageContent() {
       getLieferungById(lieferungId).then((lieferung) => {
         if (lieferung) {
           setCurrentLieferung(lieferung);
+          if (lieferung.typ) setTyp(lieferung.typ);
+          if (lieferung.wareneingang) setWareneingang(lieferung.wareneingang);
           if (lieferung.abgleich_data) setAbgleichData(lieferung.abgleich_data);
           if (lieferung.lieferschein_data) setLieferscheinData(lieferung.lieferschein_data);
           if (lieferung.rechnung_data) setRechnungData(lieferung.rechnung_data);
@@ -100,12 +107,19 @@ function FreigabePageContent() {
           details: {
             ersparnis_eur: ersparnis,
             notiz: notiz,
+            typ: typ,
             anzahl_abweichungen: anzahlAbweichungen,
             anzahl_preisabweichungen: anzahlPreisabweichungen,
             rechnung_quelle: rechnungsQuelle,
             rechnungs_nummer: rechnungData?.rechnungs_nummer || null,
             lieferant: rechnungData?.lieferant || null,
             freigabe_zeitpunkt: new Date().toISOString(),
+            // Food / HACCP
+            ...(isFood ? {
+              wareneingang_temperatur_c: wareneingang?.temperatur_c ?? null,
+              kuehlkette_ok: wareneingang?.kuehlkette_ok ?? null,
+              mhd_warnungen: mhdWarnungen.map((m: any) => ({ artikel: m.artikel, mhd: m.mhd, status: m.tone })),
+            } : {}),
           }
         });
       } catch (auditErr) {
@@ -146,6 +160,15 @@ function FreigabePageContent() {
   };
 
   const correctionInstructions = getCorrectionInstructions();
+
+  // Food: MHD-Positionen, die abgelaufen oder bald fällig sind (für Warnung + Audit-Log)
+  const mhdWarnungen = (() => {
+    if (!isFood || !lieferscheinData?.gelieferte_artikel) return [] as { artikel: string; mhd: string; tone: string; label: string }[];
+    return lieferscheinData.gelieferte_artikel
+      .filter((a: any) => a.mhd)
+      .map((a: any) => ({ artikel: a.artikel, mhd: a.mhd, ...mhdStatus(a.mhd) }))
+      .filter((a: any) => a.tone === "expired" || a.tone === "critical" || a.tone === "soon");
+  })();
 
   // Initialize correctionsChecked array when instructions change
   useEffect(() => {
@@ -239,12 +262,12 @@ function FreigabePageContent() {
           </div>
         </header>
 
-        <ProgressBar currentStep={5} lieferungId={lieferungId} lieferdatum={lieferdatum} />
+        <ProgressBar current="freigabe" typ={typ} lieferungId={lieferungId} lieferdatum={lieferdatum} />
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-12">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-accent-muted/50 px-3 py-1 text-xs font-medium text-accent ring-1 ring-accent/20">
             <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-            Schritt 5 von 5
+            {isFood ? "Schritt 4 von 4" : "Schritt 5 von 5"}
           </div>
 
           <h1 className="mt-4 text-3xl font-bold tracking-tight text-white">
@@ -257,6 +280,58 @@ function FreigabePageContent() {
           {error && (
             <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4">
               <p className="text-sm text-red-400">{error}</p>
+            </div>
+          )}
+
+          {/* Food: Wareneingang / Kühlkette (HACCP) */}
+          {isFood && wareneingang && (
+            <div className="mt-6 rounded-xl border border-border bg-surface-elevated p-6">
+              <h3 className="text-lg font-semibold text-white">Wareneingang & Kühlkette (HACCP)</h3>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div className="rounded-lg bg-surface p-4">
+                  <p className="text-xs text-muted">Wareneingangstemperatur</p>
+                  <p className="mt-1 text-lg font-semibold text-white">
+                    {wareneingang.temperatur_c != null ? `${wareneingang.temperatur_c} °C` : "—"}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-surface p-4">
+                  <p className="text-xs text-muted">Kühlkette eingehalten</p>
+                  <p className={`mt-1 text-lg font-semibold ${
+                    wareneingang.kuehlkette_ok === true ? "text-green-400" : wareneingang.kuehlkette_ok === false ? "text-red-400" : "text-muted"
+                  }`}>
+                    {wareneingang.kuehlkette_ok === true ? "Ja ✓" : wareneingang.kuehlkette_ok === false ? "Nein ✗" : "—"}
+                  </p>
+                </div>
+              </div>
+              {wareneingang.kuehlkette_ok === false && (
+                <p className="mt-3 rounded-lg bg-red-500/10 border border-red-500/30 px-3 py-2 text-sm text-red-300">
+                  Achtung: Kühlkette wurde als unterbrochen markiert. Dieser Vermerk wird mit der Freigabe im Audit-Log gespeichert.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Food: MHD-Warnungen */}
+          {isFood && mhdWarnungen.length > 0 && (
+            <div className="mt-6 rounded-xl border border-orange-500/30 bg-orange-500/10 p-6">
+              <div className="flex items-center gap-2 mb-3">
+                <svg className="h-5 w-5 text-orange-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                </svg>
+                <h3 className="text-sm font-semibold text-orange-400">
+                  {mhdWarnungen.length} Position(en) mit kurzem oder abgelaufenem MHD
+                </h3>
+              </div>
+              <div className="space-y-2">
+                {mhdWarnungen.map((m: any, i: number) => (
+                  <div key={i} className="flex items-center justify-between gap-3 rounded-lg bg-surface p-3">
+                    <p className="text-sm text-white truncate">{m.artikel}</p>
+                    <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11.5px] font-medium ${MHD_TONE_CLASS[m.tone as keyof typeof MHD_TONE_CLASS]}`}>
+                      {m.label}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -391,6 +466,7 @@ function FreigabePageContent() {
             <div className="rounded-xl border border-border bg-surface-elevated p-6">
               <h3 className="text-lg font-semibold text-white">Hochgeladene Dateien</h3>
               <div className="mt-4 space-y-3">
+                {!isFood && (
                 <div className="flex items-center justify-between rounded-lg bg-surface p-4">
                   <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-muted/50 text-accent">
@@ -420,6 +496,7 @@ function FreigabePageContent() {
                   </div>
                   <span className="text-sm text-accent">Hochgeladen</span>
                 </div>
+                )}
 
                 <div className="flex items-center justify-between rounded-lg bg-surface p-4">
                   <div className="flex items-center gap-3">
@@ -440,7 +517,7 @@ function FreigabePageContent() {
                     </div>
                     <div>
                       <p className="text-sm font-medium text-white">Lieferschein</p>
-                      <p className="text-xs text-muted">Schritt 2</p>
+                      <p className="text-xs text-muted">{isFood ? "Schritt 1" : "Schritt 2"}</p>
                     </div>
                   </div>
                   <span className="text-sm text-accent">Hochgeladen</span>
@@ -464,8 +541,8 @@ function FreigabePageContent() {
                       </svg>
                     </div>
                     <div>
-                      <p className="text-sm font-medium text-white">Gastronovi CSV</p>
-                      <p className="text-xs text-muted">Schritt 3</p>
+                      <p className="text-sm font-medium text-white">{isFood ? "Bestellung / Abgleich" : "Gastronovi CSV"}</p>
+                      <p className="text-xs text-muted">{isFood ? "Schritt 2" : "Schritt 3"}</p>
                     </div>
                   </div>
                   <span className="text-sm text-accent">Hochgeladen</span>
@@ -490,7 +567,7 @@ function FreigabePageContent() {
                     </div>
                     <div>
                       <p className="text-sm font-medium text-white">PDF Rechnung</p>
-                      <p className="text-xs text-muted">Schritt 4</p>
+                      <p className="text-xs text-muted">{isFood ? "Schritt 3" : "Schritt 4"}</p>
                     </div>
                   </div>
                   <span className="text-sm text-accent">Hochgeladen</span>

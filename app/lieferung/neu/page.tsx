@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
 import { saveLieferung, updateLieferung, getLieferanten } from "../../../lib/database";
-import { Lieferant } from "../../../lib/types";
+import { Lieferant, LieferungTyp } from "../../../lib/types";
 
 export default function NeueLieferungPage() {
   const router = useRouter();
@@ -15,6 +15,7 @@ export default function NeueLieferungPage() {
   const [lieferungId, setLieferungId] = useState<string | null>(null);
   const [lieferanten, setLieferanten] = useState<Lieferant[]>([]);
   const [selectedLieferantId, setSelectedLieferantId] = useState<string>("");
+  const [typ, setTyp] = useState<LieferungTyp>("getraenke");
 
   const [creating, setCreating] = useState(false);
 
@@ -25,12 +26,32 @@ export default function NeueLieferungPage() {
     getLieferanten().then(setLieferanten).catch(console.error);
   }, []);
 
+  // Lieferanten passend zum gewählten Typ (Kategorie "beides" zählt immer mit)
+  const passendeLieferanten = lieferanten.filter((l) => {
+    if (l.aktiv === false) return false;
+    const kat = l.kategorie || "getraenke";
+    return kat === "beides" || kat === typ;
+  });
+
+  // Typ umschalten: ggf. unpassenden Lieferanten zurücksetzen + bereits angelegte Lieferung aktualisieren
+  const handleTypChange = async (neuerTyp: LieferungTyp) => {
+    setTyp(neuerTyp);
+    const aktuell = lieferanten.find((l) => l.id === selectedLieferantId);
+    const kat = aktuell?.kategorie || "getraenke";
+    if (aktuell && kat !== "beides" && kat !== neuerTyp) {
+      setSelectedLieferantId("");
+    }
+    if (lieferungId) {
+      await updateLieferung(lieferungId, { typ: neuerTyp }).catch(console.error);
+    }
+  };
+
   // Lieferung wird erst angelegt, wenn der Nutzer wirklich einen Schritt startet
   const ensureLieferung = async (pendingLieferantId?: string): Promise<string | null> => {
     if (lieferungId) return lieferungId;
     setCreating(true);
     try {
-      const result = await saveLieferung({ pfand_items: undefined, lieferschein_data: undefined });
+      const result = await saveLieferung({ typ });
       if (result?.id) {
         const newId = result.id;
         setLieferungId(newId);
@@ -157,7 +178,7 @@ export default function NeueLieferungPage() {
           </div>
         </header>
 
-        <ProgressBar currentStep={0} lieferungId={lieferungId} lieferdatum={selectedDate} />
+        <ProgressBar current={null} typ={typ} lieferungId={lieferungId} lieferdatum={selectedDate} />
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-12">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-accent-muted/50 px-3 py-1 text-xs font-medium text-accent ring-1 ring-accent/20">
@@ -169,8 +190,45 @@ export default function NeueLieferungPage() {
             Neue Lieferung starten
           </h1>
           <p className="mt-3 max-w-xl text-muted">
-            Folgen Sie den 5 Schritten, um Ihre Lieferung vollständig zu prüfen.
+            {typ === "food"
+              ? "Folgen Sie den 4 Schritten, um Ihre Lebensmittel-Lieferung vollständig zu prüfen."
+              : "Folgen Sie den 5 Schritten, um Ihre Getränke-Lieferung vollständig zu prüfen."}
           </p>
+
+          {/* Typ-Auswahl: Getränke (mit Pfand) vs. Food (ohne Pfand) */}
+          <div className="mt-8 rounded-xl border border-border bg-surface-elevated p-6">
+            <label className="block text-sm font-medium text-white mb-3">
+              Art der Lieferung
+            </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {([
+                { value: "getraenke" as LieferungTyp, emoji: "🍺", title: "Getränke", desc: "Mit Pfand-Erfassung – 5 Schritte" },
+                { value: "food" as LieferungTyp, emoji: "🍽", title: "Food / Lebensmittel", desc: "Ohne Pfand, mit MHD & Kühlkette – 4 Schritte" },
+              ]).map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => handleTypChange(opt.value)}
+                  className={`flex items-start gap-3 rounded-xl border p-4 text-left transition-colors ${
+                    typ === opt.value
+                      ? "border-accent bg-accent-muted/20"
+                      : "border-border bg-surface hover:border-accent/50"
+                  }`}
+                >
+                  <span className="text-2xl leading-none">{opt.emoji}</span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-white">{opt.title}</span>
+                    <span className="mt-0.5 block text-xs text-muted">{opt.desc}</span>
+                  </span>
+                  {typ === opt.value && (
+                    <svg className="ml-auto h-5 w-5 flex-shrink-0 text-accent" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                    </svg>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
           {creating && (
             <div className="mt-4 inline-flex items-center gap-2 text-sm text-accent">
               <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -182,7 +240,7 @@ export default function NeueLieferungPage() {
           )}
 
           {lieferanten.length > 0 && (
-            <div className="mt-8 rounded-xl border border-border bg-surface-elevated p-6">
+            <div className="mt-6 rounded-xl border border-border bg-surface-elevated p-6">
               <label className="block text-sm font-medium text-white mb-2">
                 Lieferant auswählen
               </label>
@@ -193,12 +251,14 @@ export default function NeueLieferungPage() {
                 className="w-full rounded-lg border border-border bg-surface px-4 py-3 text-white hover:border-accent/50 transition-colors focus:border-accent focus:outline-none disabled:opacity-50"
               >
                 <option value="">Lieferant wählen (optional)...</option>
-                {lieferanten.filter(l => l.aktiv !== false).map((l) => (
+                {passendeLieferanten.map((l) => (
                   <option key={l.id} value={l.id!}>{l.name}</option>
                 ))}
               </select>
               <p className="mt-2 text-xs text-muted">
-                Lieferant jetzt wählen → automatischer Preisabgleich in Schritt 4
+                {passendeLieferanten.length === 0
+                  ? `Noch kein ${typ === "food" ? "Food" : "Getränke"}-Lieferant angelegt. Du kannst trotzdem fortfahren – Kategorie später unter „Lieferanten" setzen.`
+                  : "Lieferant jetzt wählen → automatischer Preisabgleich in Schritt Rechnung"}
               </p>
             </div>
           )}
@@ -312,6 +372,7 @@ export default function NeueLieferungPage() {
             {[
               {
                 step: 1,
+                key: "pfand",
                 title: "Pfandliste",
                 description: "Erfassen Sie alle Pfandartikel",
                 icon: (
@@ -337,6 +398,7 @@ export default function NeueLieferungPage() {
               },
               {
                 step: 2,
+                key: "lieferschein",
                 title: "Lieferschein",
                 description: "Fotografieren Sie den Lieferschein",
                 icon: (
@@ -357,8 +419,9 @@ export default function NeueLieferungPage() {
               },
               {
                 step: 3,
+                key: "abgleich",
                 title: "Abgleich",
-                description: "Laden Sie die Gastronovi CSV hoch",
+                description: "Laden Sie die Bestellung (CSV/Foto) hoch",
                 icon: (
                   <svg
                     className="h-6 w-6"
@@ -377,6 +440,7 @@ export default function NeueLieferungPage() {
               },
               {
                 step: 4,
+                key: "rechnung",
                 title: "Rechnung",
                 description: "Laden Sie die PDF-Rechnung hoch",
                 icon: (
@@ -397,6 +461,7 @@ export default function NeueLieferungPage() {
               },
               {
                 step: 5,
+                key: "freigabe",
                 title: "Freigabe",
                 description: "Überprüfen und freigeben",
                 icon: (
@@ -415,13 +480,15 @@ export default function NeueLieferungPage() {
                   </svg>
                 ),
               },
-            ].map((item) => {
-              const stepNames = ["pfand", "lieferschein", "abgleich", "rechnung", "freigabe"];
-              const stepUrl = buildStepUrl(stepNames[item.step - 1]);
-              const stepName = stepNames[item.step - 1];
+            ]
+              .filter((item) => typ !== "food" || item.key !== "pfand")
+              .map((item, idx) => {
+              const stepName = item.key;
+              const stepUrl = buildStepUrl(stepName);
+              const displayNum = idx + 1;
               return (
               <a
-                key={item.step}
+                key={item.key}
                 href={stepUrl}
                 className={`group rounded-xl border p-6 transition-colors ${
                   selectedDate
@@ -438,7 +505,7 @@ export default function NeueLieferungPage() {
                   {item.icon}
                 </div>
                 <h3 className="mt-4 text-lg font-semibold text-white">
-                  Schritt {item.step}: {item.title}
+                  Schritt {displayNum}: {item.title}
                 </h3>
                 <p className="mt-2 text-sm text-muted">{item.description}</p>
               </a>

@@ -58,6 +58,7 @@ export async function saveLieferung(data: Lieferung) {
       .insert({
         pfand_items: data.pfand_items,
         lieferschein_data: data.lieferschein_data,
+        typ: data.typ || "getraenke",
         user_id: user.id,
       })
       .select()

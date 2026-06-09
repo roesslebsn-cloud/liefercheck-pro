@@ -15,6 +15,7 @@ type Filter = {
   status: "alle" | "abgeschlossen" | "in_bearbeitung";
   datum: "alle" | "heute" | "woche" | "monat";
   abweichungen: "alle" | "mit" | "ohne";
+  typ: "alle" | "getraenke" | "food";
 };
 
 // ─── Ersparnis-Verlauf: dependency-freier SVG-Trend mit Hover-Tooltip ─────
@@ -344,7 +345,7 @@ export default function DashboardPage() {
   const [userRole, setUserRole] = useState<"chef" | "mitarbeiter">("mitarbeiter");
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [filter, setFilter] = useState<Filter>({ status: "alle", datum: "alle", abweichungen: "alle" });
+  const [filter, setFilter] = useState<Filter>({ status: "alle", datum: "alle", abweichungen: "alle", typ: "alle" });
   const [search, setSearch] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -382,11 +383,19 @@ export default function DashboardPage() {
   };
 
   const getLieferungStatus = (l: any) => {
-    if (l.status === "abgeschlossen" || (l.rechnung_data && l.lieferschein_data)) return { label: "Abgeschlossen", color: "green", step: 5 };
-    if (l.abgleich_data) return { label: "Schritt 3/5", color: "blue", step: 3 };
-    if (l.lieferschein_data) return { label: "Schritt 2/5", color: "yellow", step: 2 };
-    if (l.pfand_items) return { label: "Schritt 1/5", color: "yellow", step: 1 };
-    return { label: "Neu", color: "gray", step: 0 };
+    const food = l.typ === "food";
+    const total = food ? 4 : 5;
+    if (l.status === "abgeschlossen" || (l.rechnung_data && l.lieferschein_data)) return { label: "Abgeschlossen", color: "green", step: total, total };
+    if (food) {
+      if (l.rechnung_data) return { label: `Schritt 3/4`, color: "blue", step: 3, total };
+      if (l.abgleich_data) return { label: `Schritt 2/4`, color: "blue", step: 2, total };
+      if (l.lieferschein_data) return { label: `Schritt 1/4`, color: "yellow", step: 1, total };
+      return { label: "Neu", color: "gray", step: 0, total };
+    }
+    if (l.abgleich_data) return { label: "Schritt 3/5", color: "blue", step: 3, total };
+    if (l.lieferschein_data) return { label: "Schritt 2/5", color: "yellow", step: 2, total };
+    if (l.pfand_items) return { label: "Schritt 1/5", color: "yellow", step: 1, total };
+    return { label: "Neu", color: "gray", step: 0, total };
   };
 
   const getFiltered = () => {
@@ -395,6 +404,10 @@ export default function DashboardPage() {
       const status = getLieferungStatus(l);
       if (filter.status === "abgeschlossen" && status.color !== "green") return false;
       if (filter.status === "in_bearbeitung" && status.color === "green") return false;
+      if (filter.typ !== "alle") {
+        const lTyp = l.typ === "food" ? "food" : "getraenke";
+        if (lTyp !== filter.typ) return false;
+      }
       if (filter.datum !== "alle") {
         const created = new Date(l.erstellt_am || l.created_at);
         const now = new Date();
@@ -437,8 +450,9 @@ export default function DashboardPage() {
     const d = l.erstellt_am || l.created_at;
     const dateStr = d ? new Date(d).toISOString().split("T")[0] : "";
     const params = `?id=${l.id}${dateStr ? `&date=${dateStr}` : ""}`;
-    let step = "pfand";
-    if (!l.pfand_items) step = "pfand";
+    const food = l.typ === "food";
+    let step: string;
+    if (!food && !l.pfand_items) step = "pfand";
     else if (!l.lieferschein_data) step = "lieferschein";
     else if (!l.abgleich_data) step = "abgleich";
     else if (!l.rechnung_data) step = "rechnung";
@@ -466,7 +480,7 @@ export default function DashboardPage() {
   const zeitDecimals = stats.zeitMin >= 60 ? 1 : 0;
 
   const filtered = getFiltered();
-  const activeFilters = (filter.status !== "alle" ? 1 : 0) + (filter.datum !== "alle" ? 1 : 0) + (filter.abweichungen !== "alle" ? 1 : 0);
+  const activeFilters = (filter.status !== "alle" ? 1 : 0) + (filter.datum !== "alle" ? 1 : 0) + (filter.abweichungen !== "alle" ? 1 : 0) + (filter.typ !== "alle" ? 1 : 0);
 
   // Feature-Flags (vom Admin gesteuert): ein Eintrag erscheint, solange er nicht
   // explizit auf false gesetzt ist (Default = an).
@@ -638,6 +652,7 @@ export default function DashboardPage() {
 
             <div className="flex flex-wrap items-center gap-2">
               {[
+                { value: filter.typ, options: [["alle","Art"],["getraenke","Getränke"],["food","Food"]], onChange: (v: string) => setFilter(f => ({ ...f, typ: v as any })) },
                 { value: filter.status, options: [["alle","Status"],["abgeschlossen","Abgeschlossen"],["in_bearbeitung","In Bearbeitung"]], onChange: (v: string) => setFilter(f => ({ ...f, status: v as any })) },
                 { value: filter.datum, options: [["alle","Zeitraum"],["heute","Heute"],["woche","Diese Woche"],["monat","Dieser Monat"]], onChange: (v: string) => setFilter(f => ({ ...f, datum: v as any })) },
                 { value: filter.abweichungen, options: [["alle","Abweichungen"],["mit","Mit"],["ohne","Ohne"]], onChange: (v: string) => setFilter(f => ({ ...f, abweichungen: v as any })) },
@@ -659,7 +674,7 @@ export default function DashboardPage() {
               )}
 
               {(activeFilters > 0 || search) && (
-                <button onClick={() => { setFilter({ status: "alle", datum: "alle", abweichungen: "alle" }); setSearch(""); }}
+                <button onClick={() => { setFilter({ status: "alle", datum: "alle", abweichungen: "alle", typ: "alle" }); setSearch(""); }}
                   className="btn-ghost text-[12px]">
                   Zurücksetzen
                 </button>
@@ -694,7 +709,8 @@ export default function DashboardPage() {
               {filtered.map((l, idx) => {
                 const status = getLieferungStatus(l);
                 const hatAb = l.abgleich_data?.abgleich?.some((a: any) => a.status !== "ok");
-                const stepPct = (status.step / 5) * 100;
+                const stepPct = (status.step / status.total) * 100;
+                const istFood = l.typ === "food";
                 const dateStr = l.erstellt_am || l.created_at;
                 return (
                   <SpotlightCard key={l.id}
@@ -721,9 +737,17 @@ export default function DashboardPage() {
                     {/* Header: Date + Status badge */}
                     <div className="flex items-start justify-between mb-4 gap-2">
                       <div className="min-w-0">
-                        <p className="text-[10.5px] uppercase tracking-wider font-medium mb-1.5" style={{ color: "var(--text-faint)" }}>
-                          {fmt(dateStr)}
-                        </p>
+                        <div className="mb-1.5 flex items-center gap-2">
+                          <p className="text-[10.5px] uppercase tracking-wider font-medium" style={{ color: "var(--text-faint)" }}>
+                            {fmt(dateStr)}
+                          </p>
+                          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium"
+                            style={istFood
+                              ? { background: "rgba(245,158,11,0.12)", color: "#f59e0b" }
+                              : { background: "var(--accent-muted)", color: "var(--accent)" }}>
+                            {istFood ? "🍽 Food" : "🍺 Getränke"}
+                          </span>
+                        </div>
                         <p className="text-[14.5px] font-semibold text-white truncate leading-tight">
                           {l.rechnung_data?.lieferant || `Lieferung #${l.id?.slice(0,8)}`}
                         </p>
@@ -745,7 +769,7 @@ export default function DashboardPage() {
                     </div>
 
                     {/* Progress bar - only for in-progress */}
-                    {status.step > 0 && status.step < 5 && (
+                    {status.step > 0 && status.step < status.total && (
                       <div className="mb-4">
                         <div className="h-[3px] rounded-full overflow-hidden" style={{ background: "var(--surface)" }}>
                           <div className="h-full transition-all duration-1000 ease-out" style={{

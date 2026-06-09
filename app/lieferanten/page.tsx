@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import AuthGuard from "../components/AuthGuard";
 import AppHeader from "../components/AppHeader";
 import { getLieferanten, saveLieferant, updateLieferant, deleteLieferant, getUserRole, getPreisHistorie } from "../../lib/database";
-import { Lieferant, PreisHistorieEintrag } from "../../lib/types";
+import { Lieferant, PreisHistorieEintrag, LieferantKategorie } from "../../lib/types";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from "recharts";
@@ -19,6 +19,13 @@ const emptyForm: Omit<Lieferant, "id" | "user_id" | "erstellt_am"> = {
   kundennummer: "",
   liefertage: [],
   aktiv: true,
+  kategorie: "getraenke",
+};
+
+const KATEGORIE_LABEL: Record<LieferantKategorie, string> = {
+  getraenke: "🍺 Getränke",
+  food: "🍽 Food",
+  beides: "Getränke & Food",
 };
 
 export default function LieferantenPage() {
@@ -59,6 +66,7 @@ export default function LieferantenPage() {
       kundennummer: l.kundennummer || "",
       liefertage: l.liefertage || [],
       aktiv: l.aktiv ?? true,
+      kategorie: l.kategorie || "getraenke",
     });
     setEditId(l.id!);
     setShowForm(true);
@@ -189,6 +197,9 @@ export default function LieferantenPage() {
                         <h3 className="font-semibold text-white truncate">{l.name}</h3>
                         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${l.aktiv ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
                           {l.aktiv ? "Aktiv" : "Inaktiv"}
+                        </span>
+                        <span className="inline-flex items-center rounded-full bg-surface px-2 py-0.5 text-xs font-medium text-muted border border-border">
+                          {KATEGORIE_LABEL[l.kategorie || "getraenke"]}
                         </span>
                       </div>
                       <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted">
@@ -395,6 +406,23 @@ export default function LieferantenPage() {
                   <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                     className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-white placeholder:text-muted focus:border-accent focus:outline-none"
                     placeholder="z.B. Getränke Müller GmbH" />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-muted mb-2">Kategorie</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(["getraenke", "food", "beides"] as LieferantKategorie[]).map((kat) => (
+                      <button key={kat} type="button" onClick={() => setForm(f => ({ ...f, kategorie: kat }))}
+                        className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                          (form.kategorie || "getraenke") === kat
+                            ? "border-accent bg-accent/20 text-accent"
+                            : "border-border text-muted hover:text-white"
+                        }`}>
+                        {KATEGORIE_LABEL[kat]}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-[11px] text-muted">Bestimmt, in welchem Workflow (Getränke/Food) dieser Lieferant zur Auswahl steht.</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">

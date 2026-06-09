@@ -26,6 +26,10 @@ export interface LieferscheinItem {
   menge_gedruckt?: number;
   korrigiert?: boolean;
   unsicher?: boolean;
+  // ─── Food-spezifisch (nur bei typ === "food" relevant) ───
+  mhd?: string;                       // Mindesthaltbarkeitsdatum (YYYY-MM-DD oder frei)
+  charge?: string;                    // Chargen-/Los-Nummer (Rückverfolgbarkeit)
+  basiseinheit?: "stueck" | "kg";     // Liefereinheit: Stück (Default) oder Gewicht (kg)
 }
 
 export interface NichtGeliefertItem {
@@ -62,12 +66,23 @@ export interface AbgleichAnalysis {
   };
 }
 
+// Wareneingang / Kühlkette (HACCP) – nur bei Food-Lieferungen erfasst
+export interface Wareneingang {
+  temperatur_c?: number | null;   // gemessene Wareneingangstemperatur in °C
+  kuehlkette_ok?: boolean | null; // Kühlkette eingehalten?
+  erfasst_am?: string;            // ISO-Zeitstempel der Erfassung
+}
+
+export type LieferungTyp = "getraenke" | "food";
+
 export interface Lieferung {
   id?: string;
   created_at?: string;
   status?: string;
   notiz?: string;
+  typ?: LieferungTyp;             // "getraenke" (mit Pfand) | "food" (ohne Pfand)
   pfand_items?: PfandAnalysis;
+  wareneingang?: Wareneingang;    // Food: Temperatur + Kühlkette (HACCP)
   lieferschein_data?: LieferscheinAnalysis;
   abgleich_data?: AbgleichAnalysis;
   rechnung_data?: any;
@@ -151,6 +166,8 @@ export interface AuditLogEintrag {
   details?: Record<string, any>;
 }
 
+export type LieferantKategorie = "getraenke" | "food" | "beides";
+
 export interface Lieferant {
   id?: string;
   user_id?: string;
@@ -162,6 +179,7 @@ export interface Lieferant {
   liefertage?: string[];
   preisliste?: Record<string, number>;
   aktiv?: boolean;
+  kategorie?: LieferantKategorie; // bestimmt, in welchem Workflow der Lieferant erscheint
   erstellt_am?: string;
 }
 

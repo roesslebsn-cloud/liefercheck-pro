@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
 import ProgressBar from "../../components/ProgressBar";
 import { updateLieferung, getLieferungById, getLieferanten, speicherPreisHistorie, findLieferantByName, berechnePreisabweichungen } from "../../../lib/database";
-import { Lieferant } from "../../../lib/types";
+import { Lieferant, LieferungTyp } from "../../../lib/types";
 
 function RechnungPageContent() {
   const router = useRouter();
@@ -28,11 +28,14 @@ function RechnungPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [isXmlMode, setIsXmlMode] = useState(false);
   const [xmlFile, setXmlFile] = useState<File | null>(null);
+  const [typ, setTyp] = useState<LieferungTyp>("getraenke");
+  const isFood = typ === "food";
 
   useEffect(() => {
     getLieferanten().then(setLieferanten).catch(console.error);
     if (lieferungId) {
       getLieferungById(lieferungId).then((lieferung) => {
+        if (lieferung?.typ) setTyp(lieferung.typ);
         if (lieferung?.rechnung_data) {
           setResults(lieferung.rechnung_data);
           if (lieferung.rechnung_data.preisabweichungen) setPreisabweichungen(lieferung.rechnung_data.preisabweichungen);
@@ -232,7 +235,7 @@ function RechnungPageContent() {
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "rechnung", images }),
+        body: JSON.stringify({ type: "rechnung", images, warenart: typ }),
       });
       const data = await response.json();
       await applyPreisabgleichAndSave(data);
@@ -307,12 +310,12 @@ function RechnungPageContent() {
           </div>
         </header>
 
-        <ProgressBar currentStep={4} lieferungId={lieferungId} lieferdatum={lieferdatum} />
+        <ProgressBar current="rechnung" typ={typ} lieferungId={lieferungId} lieferdatum={lieferdatum} />
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-12">
           <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-accent-muted/50 px-3 py-1 text-xs font-medium text-accent ring-1 ring-accent/20">
             <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-            Schritt 4 von 5
+            {isFood ? "Schritt 3 von 4" : "Schritt 4 von 5"}
           </div>
 
           <h1 className="mt-4 text-3xl font-bold tracking-tight text-white">

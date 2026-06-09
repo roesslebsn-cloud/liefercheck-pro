@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "../../components/AuthGuard";
 import AppHeader from "../../components/AppHeader";
 import { getLieferungById, deleteLieferung, getUserRole, normalizeArtikelKey, getLieferanten, logAudit, getLetzterAuditEintrag } from "../../../lib/database";
+import { mhdStatus, MHD_TONE_CLASS } from "../../../lib/food";
 
 function LieferungDetailContent() {
   const router = useRouter();
@@ -223,10 +224,12 @@ function LieferungDetailContent() {
   const preisabweichungen = getPreisabweichungen();
   const abgleich = lieferung.abgleich_data?.abgleich ?? [];
   const isChef = userRole === "chef";
+  const isFood = lieferung.typ === "food";
+  const wareneingang = lieferung.wareneingang;
 
-  const steps = [
+  const allSteps = [
     {
-      n: 1, label: "Pfandliste", icon: "📦",
+      n: 1, label: "Pfandliste", icon: "📦", typKey: "pfand",
       done: !!lieferung.pfand_items,
       editPath: `/lieferung/pfand`,
       content: lieferung.pfand_items ? (
@@ -244,16 +247,41 @@ function LieferungDetailContent() {
       ) : <p className="text-sm text-white/30 italic">Schritt nicht abgeschlossen</p>
     },
     {
-      n: 2, label: "Lieferschein", icon: "📄",
+      n: 2, label: "Lieferschein", icon: "📄", typKey: "lieferschein",
       done: !!lieferung.lieferschein_data,
       editPath: `/lieferung/lieferschein`,
       content: lieferung.lieferschein_data ? (
         <div className="space-y-1.5">
+          {/* Food: Wareneingang / Kühlkette (HACCP) */}
+          {isFood && wareneingang && (
+            <div className="mb-3 flex flex-wrap gap-2">
+              <span className="rounded-lg bg-white/5 px-3 py-2 text-xs text-white/60">
+                Temperatur: <span className="text-white">{wareneingang.temperatur_c != null ? `${wareneingang.temperatur_c} °C` : "—"}</span>
+              </span>
+              <span className={"rounded-lg px-3 py-2 text-xs " + (wareneingang.kuehlkette_ok === false ? "bg-red-500/10 text-red-300" : "bg-white/5 text-white/60")}>
+                Kühlkette: <span className={wareneingang.kuehlkette_ok === false ? "text-red-300" : "text-white"}>
+                  {wareneingang.kuehlkette_ok === true ? "Ja ✓" : wareneingang.kuehlkette_ok === false ? "Nein ✗" : "—"}
+                </span>
+              </span>
+            </div>
+          )}
           <p className="text-xs text-white/30 mb-3">Gelieferte Artikel</p>
           {lieferung.lieferschein_data.gelieferte_artikel?.map((a: any, i: number) => (
-            <div key={i} className="flex items-center justify-between rounded-lg bg-white/5 px-4 py-3">
-              <span className="text-sm text-white/70">{a.artikel}</span>
-              <span className="text-sm text-white/40">{a.menge}x {a.groesse}</span>
+            <div key={i} className="flex items-center justify-between gap-2 rounded-lg bg-white/5 px-4 py-3">
+              <div className="min-w-0">
+                <span className="text-sm text-white/70">{a.artikel}</span>
+                {isFood && (a.charge || a.mhd) && (
+                  <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                    {a.mhd && (
+                      <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${MHD_TONE_CLASS[mhdStatus(a.mhd).tone]}`}>
+                        MHD {mhdStatus(a.mhd).label}
+                      </span>
+                    )}
+                    {a.charge && <span className="text-[10px] text-white/30">Charge {a.charge}</span>}
+                  </span>
+                )}
+              </div>
+              <span className="shrink-0 text-sm text-white/40">{a.menge}{isFood && a.basiseinheit === "kg" ? " kg" : "x"} {a.groesse}</span>
             </div>
           ))}
           {lieferung.lieferschein_data.nicht_geliefert?.length > 0 && (
@@ -271,7 +299,7 @@ function LieferungDetailContent() {
       ) : <p className="text-sm text-white/30 italic">Schritt nicht abgeschlossen</p>
     },
     {
-      n: 3, label: "Abgleich", icon: "⚖️",
+      n: 3, label: "Abgleich", icon: "⚖️", typKey: "abgleich",
       done: !!lieferung.abgleich_data,
       editPath: `/lieferung/abgleich`,
       content: abgleich.length > 0 ? (
@@ -291,7 +319,7 @@ function LieferungDetailContent() {
       ) : <p className="text-sm text-white/30 italic">Schritt nicht abgeschlossen</p>
     },
     {
-      n: 4, label: "Rechnung", icon: "🧾",
+      n: 4, label: "Rechnung", icon: "🧾", typKey: "rechnung",
       done: !!lieferung.rechnung_data,
       editPath: `/lieferung/rechnung`,
       content: lieferung.rechnung_data ? (
@@ -319,7 +347,7 @@ function LieferungDetailContent() {
       ) : <p className="text-sm text-white/30 italic">Schritt nicht abgeschlossen</p>
     },
     {
-      n: 5, label: "Freigabe", icon: "✅",
+      n: 5, label: "Freigabe", icon: "✅", typKey: "freigabe",
       done: !!lieferung.freigabe_erteilt,
       editPath: `/lieferung/freigabe`,
       content: (
@@ -330,6 +358,9 @@ function LieferungDetailContent() {
       )
     }
   ];
+
+  // Food-Lieferungen haben keinen Pfand-Schritt
+  const steps = allSteps.filter((s) => !isFood || s.typKey !== "pfand");
 
   return (
     <AuthGuard>
@@ -346,7 +377,15 @@ function LieferungDetailContent() {
               Zurück
             </button>
             <div className="text-center min-w-0">
-              <p className="text-[14px] font-semibold text-white truncate">Lieferung #{id?.slice(0,8)}</p>
+              <div className="flex items-center justify-center gap-2">
+                <p className="text-[14px] font-semibold text-white truncate">Lieferung #{id?.slice(0,8)}</p>
+                <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium"
+                  style={isFood
+                    ? { background: "rgba(245,158,11,0.12)", color: "#f59e0b" }
+                    : { background: "var(--accent-muted)", color: "var(--accent)" }}>
+                  {isFood ? "🍽 Food" : "🍺 Getränke"}
+                </span>
+              </div>
               <p className="text-[11px] text-muted">{fmt(lieferung.erstellt_am)}</p>
             </div>
             <div className="flex items-center gap-2">
@@ -444,7 +483,7 @@ function LieferungDetailContent() {
 
           {/* Step cards - clickable */}
           <div className="space-y-2">
-            {steps.map(step => (
+            {steps.map((step, idx) => (
               <div key={step.n} className="rounded-xl border border-white/5 bg-white/[0.02] overflow-hidden">
                 <button
                   onClick={() => setOpenStep(openStep === step.n ? null : step.n)}
@@ -452,7 +491,7 @@ function LieferungDetailContent() {
                 >
                   <div className="flex items-center gap-3">
                     <span className={"flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold " + (step.done ? "bg-emerald-500/20 text-emerald-400" : "bg-white/5 text-white/30")}>
-                      {step.done ? "✓" : step.n}
+                      {step.done ? "✓" : idx + 1}
                     </span>
                     <span className="text-sm font-medium text-white">{step.label}</span>
                     {!step.done && <span className="text-[10px] text-white/25">Nicht abgeschlossen</span>}

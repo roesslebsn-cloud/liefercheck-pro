@@ -60,8 +60,11 @@ const LIEFERSCHEIN_TOOL: Anthropic.Tool = {
             menge_gedruckt: { type: "number", description: "Die ursprünglich GEDRUCKTE Menge (auch wenn eingekreist korrigiert)." },
             korrigiert: { type: "boolean", description: "true NUR wenn eine eingekreiste Zahl die gedruckte Menge ersetzt." },
             unsicher: { type: "boolean", description: "true, wenn die Markierung/Menge nicht eindeutig lesbar ist." },
-            einheit: { type: "string", description: "Eh-Spalte: Kasten, Fass, Flasche, Stück." },
-            groesse: { type: "string", description: "Gebinde, z.B. '6 x 1,0', '24x0,2', '30 l'." },
+            einheit: { type: "string", description: "Eh-Spalte: Kasten, Fass, Flasche, Stück, kg." },
+            groesse: { type: "string", description: "Gebinde, z.B. '6 x 1,0', '24x0,2', '30 l', '5 kg'." },
+            basiseinheit: { type: "string", enum: ["stueck", "kg"], description: "NUR Food: 'kg' wenn nach Gewicht geliefert, sonst 'stueck'." },
+            mhd: { type: "string", description: "NUR Food: Mindesthaltbarkeitsdatum, falls auf dem Lieferschein gedruckt (Format YYYY-MM-DD oder wie gedruckt). Sonst weglassen." },
+            charge: { type: "string", description: "NUR Food: Chargen-/Los-Nummer, falls aufgedruckt. Sonst weglassen." },
           },
           required: ["artikel", "menge"],
         },
@@ -124,7 +127,7 @@ const BESTELLUNG_TOOL: Anthropic.Tool = {
 
 const RECHNUNG_TOOL: Anthropic.Tool = {
   name: "rechnung_erfassen",
-  description: "Erfasst alle Daten einer Getränke-Rechnung als strukturierte Liste.",
+  description: "Erfasst alle Daten einer Lieferanten-Rechnung (Getränke oder Lebensmittel) als strukturierte Liste.",
   input_schema: {
     type: "object",
     properties: {
@@ -190,7 +193,8 @@ const ABGLEICH_TOOL: Anthropic.Tool = {
 
 export async function POST(request: NextRequest) {
   try {
-    const { type, images, data } = await request.json();
+    const { type, images, data, warenart } = await request.json();
+    const istFood = warenart === "food";
 
     if (!type) {
       return NextResponse.json({ error: "Ungültige Anfrage: type ist erforderlich" }, { status: 400 });
@@ -247,10 +251,20 @@ AUSGABE NUR ALS JSON, kein Text davor oder danach:
         return NextResponse.json({ error: "Ungültige Anfrage: images sind erforderlich" }, { status: 400 });
       }
 
-      const systemPrompt =
-        "Du bist ein extrem sorgfältiger OCR-Experte für deutsche Getränke-Großhandel-Lieferscheine (GLH/Gefako/Lüning/Radeberger). Du transkribierst jeden Artikelnamen ZEICHEN FÜR ZEICHEN exakt so, wie er gedruckt ist. Du erfindest, normalisierst oder ergänzt NIEMALS etwas. Jede Zeile der Tabelle muss einzeln gelesen werden. Ergebnis ausschließlich über das bereitgestellte Tool.";
+      const systemPrompt = istFood
+        ? "Du bist ein extrem sorgfältiger OCR-Experte für deutsche Lebensmittel-/Food-Großhandel-Lieferscheine (Metro/Transgourmet/Chefs Culinar/regionale Lieferanten). Du transkribierst jeden Artikelnamen ZEICHEN FÜR ZEICHEN exakt so, wie er gedruckt ist. Du erfindest, normalisierst oder ergänzt NIEMALS etwas. Jede Zeile der Tabelle muss einzeln gelesen werden. Ergebnis ausschließlich über das bereitgestellte Tool."
+        : "Du bist ein extrem sorgfältiger OCR-Experte für deutsche Getränke-Großhandel-Lieferscheine (GLH/Gefako/Lüning/Radeberger). Du transkribierst jeden Artikelnamen ZEICHEN FÜR ZEICHEN exakt so, wie er gedruckt ist. Du erfindest, normalisierst oder ergänzt NIEMALS etwas. Jede Zeile der Tabelle muss einzeln gelesen werden. Ergebnis ausschließlich über das bereitgestellte Tool.";
 
-      const prompt = `Lies diesen Lieferschein eines deutschen Getränke-Fachgroßhandels sorgfältig Zeile für Zeile.
+      const foodHinweis = istFood ? `
+
+FOOD-BESONDERHEITEN (dieser Lieferschein ist eine LEBENSMITTEL-Lieferung):
+- Es gibt KEIN Pfand/Leergut. Lasse "pfand_eintrage" leer.
+- Mengen können in Stück ODER in Gewicht (kg) angegeben sein. Setze "basiseinheit" = "kg", wenn die Position klar nach Gewicht geliefert wird (z.B. "4,250 kg Rinderhüfte"), sonst "stueck". Die "menge" ist dann der Zahlenwert (z.B. 4.25).
+- Falls ein Mindesthaltbarkeitsdatum (MHD/Verbrauchsdatum) je Position gedruckt ist: in "mhd" übernehmen (möglichst YYYY-MM-DD). Wenn keins gedruckt ist: Feld weglassen.
+- Falls eine Chargen-/Los-Nummer (Charge, Los, LOT) gedruckt ist: in "charge" übernehmen. Sonst weglassen.
+- Erfinde MHD oder Charge NIEMALS – nur übernehmen, was wirklich auf dem Papier steht.` : "";
+
+      const prompt = `Lies diesen Lieferschein eines deutschen ${istFood ? "Lebensmittel-/Food-Großhandels" : "Getränke-Fachgroßhandels"} sorgfältig Zeile für Zeile.${foodHinweis}
 
 SCHRITT 1 – TABELLENSTRUKTUR ERKENNEN:
 Finde die Datentabelle. Typische Spalten von links nach rechts:
